@@ -1,11 +1,16 @@
-# app/admin_utils.py
+# app/utils.py
 import logging
 import shutil
 import datetime
 import os
 
-def init_logger(log_file="msms.log"):
+def init_logger(log_file="foodshare.log"):
     """Configures the root logger to write to a file."""
+    # Ensure folder exists if log_file is inside a subfolder
+    log_dir = os.path.dirname(log_file)
+    if log_dir and not os.path.exists(log_dir):
+        os.makedirs(log_dir, exist_ok=True)
+
     # Configure basic logging. Set the level to INFO.
     # Set the format to include a timestamp, level name, and message.
     # Set the output file (handler).
@@ -17,7 +22,7 @@ def init_logger(log_file="msms.log"):
     )
     print(f"Logging configured. Outputting to {log_file}")
 
-def backup_data(data_path="data/msms.json", backup_dir="data/backups"):
+def backup_data(data_path="src/data/data.json", backup_dir="src/data/backups"):
     """Creates a timestamped backup of the main data file."""
     # Check if the backup directory exists, and create it if it doesn't.
     if not os.path.exists(backup_dir):
@@ -25,7 +30,7 @@ def backup_data(data_path="data/msms.json", backup_dir="data/backups"):
     
     # Create a timestamp string (e.g., YYYY-MM-DD_HH-MM-SS).
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    backup_filename = f"msms_backup_{timestamp}.json"
+    backup_filename = f"foodshare_backup_{timestamp}.json"
     backup_filepath = os.path.join(backup_dir, backup_filename)
     
     try:
