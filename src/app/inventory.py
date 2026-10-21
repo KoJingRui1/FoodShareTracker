@@ -63,7 +63,7 @@ class Inventory:
             return existing_item
 
         # Create a new item.
-        item = Item(
+        item = item(
             self.inventory_data["next_item_id"],
             name.strip(),
             category.strip(),

@@ -1,4 +1,4 @@
-from gui.main_dashboard import launch
+from src.gui.main_dashboard import launch
 # TODO: Import the new admin utilities.
 from src.app.utils import init_logger, backup_data
 
