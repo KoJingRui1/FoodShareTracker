@@ -1,6 +1,8 @@
 # Store Food Bank data in a JSON file.
 import json
 import datetime
+import logging
+import csv
 from pathlib import Path
 
 try:
@@ -13,6 +15,10 @@ try:
     from src.app.volunteer import VolunteerUser
     from src.app.inventory import Inventory
     from src.app.item import Item
+    from src.app.utils import (
+        valid_name, valid_password, validate_name, validate_password,
+        hash_password, verify_password, is_bcrypt_hash
+    )
 except ModuleNotFoundError:
     from app.admin import AdminUser
     from app.client import ClientUser
@@ -23,6 +29,10 @@ except ModuleNotFoundError:
     from app.volunteer import VolunteerUser
     from app.inventory import Inventory
     from app.item import Item
+    from app.utils import (
+        valid_name, valid_password, validate_name, validate_password,
+        hash_password, verify_password, is_bcrypt_hash
+    )
 
 
 class FoodBank:
@@ -35,6 +45,41 @@ class FoodBank:
         "volunteers": VolunteerUser,
         "clients": ClientUser,
     }
+
+    @staticmethod
+    def valid_name(name, **kwargs):
+        """Helper to validate a user or entity name."""
+        return valid_name(name, **kwargs)
+
+    @staticmethod
+    def valid_password(password, **kwargs):
+        """Helper to validate a user password."""
+        return valid_password(password, **kwargs)
+
+    @staticmethod
+    def validate_name(name, **kwargs):
+        """Helper to validate name returning (is_valid, reason)."""
+        return validate_name(name, **kwargs)
+
+    @staticmethod
+    def validate_password(password, **kwargs):
+        """Helper to validate password returning (is_valid, reason)."""
+        return validate_password(password, **kwargs)
+
+    @staticmethod
+    def hash_password(password):
+        """Helper to hash password with bcrypt."""
+        return hash_password(password)
+
+    @staticmethod
+    def verify_password(password, hashed_password):
+        """Helper to verify password against bcrypt hash."""
+        return verify_password(password, hashed_password)
+
+    @staticmethod
+    def is_bcrypt_hash(stored_hash):
+        """Helper to check if string is bcrypt hash."""
+        return is_bcrypt_hash(stored_hash)
 
     def __init__(self, data_path=None):
         # Default path: <project root>/src/data/data.json.
@@ -144,6 +189,9 @@ class FoodBank:
                     volunteer_id=donation_data.get("volunteer_id")
                 )
                 donation.items = donation_data.get("items", [])
+                donation.flagged_issue = donation_data.get("flagged_issue", None)
+                donation.previous_status = donation_data.get("previous_status", None)
+                donation.issue_history = donation_data.get("issue_history", [])
                 self.donations.append(donation)
 
             for hamper_data in data.get("food_hampers", []):
@@ -155,6 +203,9 @@ class FoodBank:
                     volunteer_id=hamper_data.get("volunteer_id")
                 )
                 hamper.items = hamper_data.get("items", [])
+                hamper.flagged_issue = hamper_data.get("flagged_issue", None)
+                hamper.previous_status = hamper_data.get("previous_status", None)
+                hamper.issue_history = hamper_data.get("issue_history", [])
                 self.food_hampers.append(hamper)
 
             self.food_bank_data = data.get("food_bank_data", {
@@ -163,12 +214,25 @@ class FoodBank:
                 "next_food_hamper_id": 1,
             })
 
-            # Load inventory data safely inside try block.
-            inventory_data = data.get("inventory", {})
+            # Load inventory data safely inside try block (handles both list and dict formats).
+            raw_inventory = data.get("inventory", {})
             self.inventory = Inventory()
             self.inventory.items = []
 
-            for item_data in inventory_data.get("items", []):
+            if isinstance(raw_inventory, list):
+                items_list = raw_inventory
+                records_list = data.get("inventory_transactions", [])
+                inv_metadata = {"next_item_id": 1, "next_record_id": 1}
+            elif isinstance(raw_inventory, dict):
+                items_list = raw_inventory.get("items", [])
+                records_list = raw_inventory.get("stock_records", [])
+                inv_metadata = raw_inventory.get("inventory_data", {"next_item_id": 1, "next_record_id": 1})
+            else:
+                items_list = []
+                records_list = []
+                inv_metadata = {"next_item_id": 1, "next_record_id": 1}
+
+            for item_data in items_list:
                 item = Item(
                     item_data["id"],
                     item_data["name"],
@@ -179,14 +243,8 @@ class FoodBank:
                 )
                 self.inventory.items.append(item)
 
-            self.inventory.stock_records = inventory_data.get("stock_records", [])
-            self.inventory.inventory_data = inventory_data.get(
-                "inventory_data",
-                {
-                    "next_item_id": 1,
-                    "next_record_id": 1
-                }
-            )
+            self.inventory.stock_records = records_list
+            self.inventory.inventory_data = inv_metadata
 
         except (FileNotFoundError, json.JSONDecodeError):
             print("Data file not found or corrupted. Starting with a clean state.")
@@ -214,6 +272,7 @@ class FoodBank:
         self.data_path.parent.mkdir(parents=True, exist_ok=True)
         with self.data_path.open("w", encoding="utf-8") as file:
             json.dump(data_to_save, file, indent=4, ensure_ascii=False)
+        logging.info(f"Saved system data to JSON file: {self.data_path}")
 
     def save_data(self):
         self._save_data()
@@ -264,9 +323,15 @@ class FoodBank:
         return None
 
     def authenticate(self, email, password):
-        """Authenticates user credentials and returns (user, role_name) or None."""
+        """Authenticates user credentials using bcrypt and returns (user, role_name) or None."""
         user = self.find_user_by_email(email)
-        if user is not None and user.password == password:
+        if user is None or not password or not hasattr(user, "password"):
+            return None
+        if verify_password(password, user.password):
+            # Auto-upgrade plain-text password to bcrypt hash upon successful login
+            if not is_bcrypt_hash(user.password):
+                user.password = hash_password(password)
+                self._save_data()
             for role_name, model in self.USER_MODELS.items():
                 if isinstance(user, model):
                     return user, role_name
@@ -275,9 +340,11 @@ class FoodBank:
     def _add_user(self, model, collection, name, password, email, profile_image="assets/default_avatar.png"):
         if self.find_user_by_email(email) is not None:
             raise ValueError(f"Email '{email}' is already registered.")
-        user = model(self.food_bank_data["next_user_id"], name, password, email, profile_image=profile_image)
+        hashed_password = hash_password(password) if not is_bcrypt_hash(password) else password
+        user = model(self.food_bank_data["next_user_id"], name, hashed_password, email, profile_image=profile_image)
         collection.append(user)
         self.food_bank_data["next_user_id"] += 1
+        logging.info(f"Added user: {user.name} (Role: {model.__name__}, ID: {user.id}, Email: {user.email})")
         self._save_data()
         return user
 
@@ -292,18 +359,27 @@ class FoodBank:
     def add_client(self, name, password, email, description="", profile_image="assets/default_avatar.png"): 
         if self.find_user_by_email(email) is not None:
             raise ValueError(f"Email '{email}' is already registered.")
+        hashed_password = hash_password(password) if not is_bcrypt_hash(password) else password
         user = ClientUser(
             self.food_bank_data["next_user_id"],
             name,
-            password,
+            hashed_password,
             email,
             description=description,
             profile_image=profile_image
         )
         self.clients.append(user)
         self.food_bank_data["next_user_id"] += 1
+        logging.info(f"Added client: {user.name} (ID: {user.id}, Email: {user.email})")
         self._save_data()
         return user
+
+    def get_all_users(self):
+        """Returns a combined list of all users across all role collections."""
+        all_users = []
+        for collection_name in self.USER_MODELS:
+            all_users.extend(getattr(self, collection_name, []))
+        return all_users
 
     def get_user_profile_image(self, user_id):
         """Returns the profile image path for the specified user, or default avatar if unset."""
@@ -314,6 +390,7 @@ class FoodBank:
 
     def set_user_profile_image(self, user_id, profile_image):
         """Updates the profile image path for the specified user and saves to disk."""
+        logging.info(f"Updated profile image for user ID {user_id} to '{profile_image}'")
         return self.update_user(user_id, profile_image=profile_image)
 
     def update_user_profile_image(self, user_id, profile_image):
@@ -333,11 +410,14 @@ class FoodBank:
         existing_by_email = self.find_user_by_email(user.email)
         if existing_by_email is not None and str(existing_by_email.id) != str(user.id):
             raise ValueError(f"Email '{user.email}' is already registered.")
+        if hasattr(user, "password") and user.password and not is_bcrypt_hash(user.password):
+            user.password = hash_password(user.password)
         collection.append(user)
         try:
             self.food_bank_data["next_user_id"] = max(self.food_bank_data["next_user_id"], int(user.id) + 1)
         except (TypeError, ValueError):
             pass
+        logging.info(f"Added user instance: {user.name} (ID: {user.id})")
         self._save_data()
         return user
 
@@ -360,9 +440,10 @@ class FoodBank:
                         if str(curr_status).lower() == "created":
                             continue  # Delete created hamper together with client
                         else:
-                            # Assigned hamper cannot be deleted; unbind client and reset status to created
+                            # Assigned or packed hamper cannot be deleted; unbind client
                             hamper.client_id = None
-                            hamper.status = "created"
+                            if str(curr_status).lower() == "assigned":
+                                hamper.status = "created"
                             retained_hampers.append(hamper)
                     else:
                         retained_hampers.append(hamper)
@@ -398,6 +479,7 @@ class FoodBank:
                         donation.volunteer_id = None
 
             collection.remove(user)
+            logging.info(f"Removed user ID {user_id} ({user.name}, Role: {type(user).__name__})")
             self._save_data()
             return user
         return None
@@ -415,7 +497,10 @@ class FoodBank:
                 existing = self.find_user_by_email(value)
                 if existing is not None and str(existing.id) != str(user_id):
                     raise ValueError(f"Email '{value}' is already in use by another user.")
+            if field == "password" and value and not is_bcrypt_hash(value):
+                value = hash_password(value)
             setattr(user, field, value)
+        logging.info(f"Updated user ID {user_id}: {fields}")
         self._save_data()
         return user
 
@@ -432,11 +517,15 @@ class FoodBank:
             volunteer_id=None
         )
         if items is not None:
-            donation.items = list(items)
+            if isinstance(items, dict):
+                donation.items = [{"name": k, "quantity": v} for k, v in items.items()]
+            else:
+                donation.items = list(items)
         self.donations.append(donation)
         if hasattr(donor, "donation") and donation.id not in donor.donation:
             donor.donation.append(donation.id)
         self.food_bank_data["next_donation_id"] += 1
+        logging.info(f"Added donation ID {donation.id} for donor ID {donor_id}")
         self._save_data()
         return donation
 
@@ -453,6 +542,7 @@ class FoodBank:
         donation.volunteer_id = volunteer.id
         if hasattr(volunteer, "work") and donation.id not in volunteer.work:
             volunteer.work.append(donation.id)
+        logging.info(f"Donation ID {donation_id} collected by volunteer ID {volunteer_id}")
         self._save_data()
         return donation
 
@@ -491,6 +581,7 @@ class FoodBank:
                 stocked_items.append({"item_id": new_item.id, "name": name, "quantity": quantity})
 
         donation.status = "stocked"
+        logging.info(f"Stocked donation ID {donation_id} into inventory ({len(stocked_items)} items)")
         self._save_data()
         return stocked_items
 
@@ -506,6 +597,7 @@ class FoodBank:
             if field == "volunteer_id" and value not in (None, "", 0) and self.find_volunteer_by_id(value) is None:
                 raise ValueError(f"Volunteer ID {value} does not exist.")
             setattr(donation, field, value)
+        logging.info(f"Updated donation ID {donation_id}: {fields}")
         self._save_data()
         return donation
 
@@ -525,6 +617,7 @@ class FoodBank:
         for donor in self.donors:
             if hasattr(donor, "donation"):
                 donor.donation = [item for item in donor.donation if str(item) != str(donation_id)]
+        logging.info(f"Removed donation ID {donation_id}")
         self._save_data()
         return True
 
@@ -537,13 +630,15 @@ class FoodBank:
         if client_id not in (None, "", 0):
             if self.find_client_by_id(client_id) is None:
                 raise ValueError(f"Client ID {client_id} does not exist.")
-            status = "assigned"
         else:
             client_id = None
+
+        if volunteer_id not in (None, "", 0):
+            if self.find_volunteer_by_id(volunteer_id) is None:
+                raise ValueError(f"Volunteer ID {volunteer_id} does not exist.")
+            status = "assigned"
+        else:
             status = "created"
-        
-        if volunteer_id not in (None, "", 0) and self.find_volunteer_by_id(volunteer_id) is None:
-            raise ValueError(f"Volunteer ID {volunteer_id} does not exist.")
 
         hamper = FoodHamper(
             self.food_bank_data["next_food_hamper_id"],
@@ -553,7 +648,10 @@ class FoodBank:
             volunteer_id=volunteer_id
         )
         if items is not None:
-            hamper.items = list(items)
+            if isinstance(items, dict):
+                hamper.items = [{"name": k, "quantity": v} for k, v in items.items()]
+            else:
+                hamper.items = list(items)
         if client_id:
             client = self.find_client_by_id(client_id)
             if hasattr(client, "receive") and hamper.id not in client.receive:
@@ -565,6 +663,7 @@ class FoodBank:
 
         self.food_hampers.append(hamper)
         self.food_bank_data["next_food_hamper_id"] += 1
+        logging.info(f"Added food hamper ID {hamper.id} (Status: '{hamper.status}')")
         self._save_data()
         return hamper
 
@@ -580,23 +679,25 @@ class FoodBank:
             if field == "volunteer_id" and value not in (None, "", 0) and self.find_volunteer_by_id(value) is None:
                 raise ValueError(f"Volunteer ID {value} does not exist.")
             setattr(hamper, field, value)
+        logging.info(f"Updated food hamper ID {hamper_id}: {fields}")
         self._save_data()
         return hamper
 
     def remove_food_hamper(self, hamper_id):
-        """Deletes food hamper only if status is 'created'; raises ValueError if 'assigned'."""
+        """Deletes food hamper only if status is 'created'; raises ValueError if not 'created'."""
         hamper = self.find_food_hamper_by_id(hamper_id)
         if hamper is None:
             return False
         
         curr_status = hamper.status[0] if isinstance(hamper.status, list) and hamper.status else (hamper.status or "")
-        if str(curr_status).lower() == "assigned":
-            raise ValueError(f"Cannot delete food hamper {hamper_id} with status 'assigned'. Only 'created' food hampers can be deleted.")
+        if str(curr_status).lower() != "created":
+            raise ValueError(f"Cannot delete food hamper {hamper_id} with status '{curr_status}'. Only 'created' food hampers can be deleted.")
         
         self.food_hampers.remove(hamper)
         for client in self.clients:
             if hasattr(client, "receive"):
                 client.receive = [item for item in client.receive if str(item) != str(hamper_id)]
+        logging.info(f"Removed food hamper ID {hamper_id}")
         self._save_data()
         return True
 
@@ -613,6 +714,10 @@ class FoodBank:
         if hamper.client_id not in (None, "", 0) and str(hamper.client_id) != str(client_id):
             raise ValueError("This food hamper is already assigned to another client.")
         
+        curr_status = hamper.status[0] if isinstance(hamper.status, list) and hamper.status else (hamper.status or "")
+        if str(curr_status).lower() in ("delivered", "cancelled"):
+            raise ValueError(f"Cannot assign food hamper {hamper_id} with status '{curr_status}'.")
+
         if volunteer_id is not None:
             volunteer = self.find_volunteer_by_id(volunteer_id)
             if volunteer is None:
@@ -622,9 +727,11 @@ class FoodBank:
                 volunteer.work.append(hamper.id)
 
         hamper.client_id = client.id
-        hamper.status = "assigned"
+        if str(curr_status).lower() != "packed":
+            hamper.status = "assigned"
         if hasattr(client, "receive") and hamper.id not in client.receive:
             client.receive.append(hamper.id)
+        logging.info(f"Assigned food hamper ID {hamper_id} to client ID {client_id} (Volunteer: {volunteer_id})")
         self._save_data()
         return hamper
 
@@ -635,14 +742,17 @@ class FoodBank:
             raise ValueError(f"Food hamper ID {hamper_id} does not exist.")
         
         curr_status = hamper.status[0] if isinstance(hamper.status, list) and hamper.status else (hamper.status or "")
-        if str(curr_status).lower() != "assigned":
-            raise ValueError(f"Cannot deliver hamper {hamper_id} with status '{curr_status}'. Hamper must be 'assigned' before delivery.")
+        if str(curr_status).lower() not in ("assigned", "packed"):
+            raise ValueError(
+                f"Cannot deliver hamper {hamper_id} with status '{curr_status}'. Hamper must be 'packed' or 'assigned' before delivery."
+            )
 
         if volunteer_id is not None and hamper.volunteer_id is not None:
             if str(hamper.volunteer_id) != str(volunteer_id):
                 raise PermissionError(f"Volunteer {volunteer_id} is not the assigned volunteer for hamper {hamper_id}.")
 
         hamper.status = "delivered"
+        logging.info(f"Delivered food hamper ID {hamper_id} to client")
 
         # Complete work in the assigned volunteer's list (moves to completed_work)
         target_vol_id = volunteer_id or hamper.volunteer_id
@@ -671,6 +781,9 @@ class FoodBank:
         if not items_to_pack:
             raise ValueError(f"Cannot pack hamper {hamper_id} with an empty item list.")
 
+        if isinstance(items_to_pack, dict):
+            items_to_pack = [{"name": k, "quantity": v} for k, v in items_to_pack.items()]
+
         # 1. Pre-check: verify all items exist and have sufficient stock before deducting anything
         prepared_deductions = []
         for it in items_to_pack:
@@ -678,6 +791,10 @@ class FoodBank:
                 item_id = it.get("item_id") or it.get("id")
                 item_name = it.get("name")
                 qty = float(it.get("quantity", 1))
+            elif isinstance(it, str):
+                item_id = None
+                item_name = it
+                qty = 1.0
             else:
                 item_id = getattr(it, "id", None)
                 item_name = getattr(it, "name", None)
@@ -702,8 +819,8 @@ class FoodBank:
             self.remove_stock(inv_item.id, qty, reason=f"Packed for Hamper #{hamper_id}")
 
         hamper.items = list(items_to_pack)
-        if str(curr_status).lower() == "created":
-            hamper.status = "packed"
+        hamper.status = "packed"
+        logging.info(f"Packed food hamper ID {hamper_id} with {len(items_to_pack)} items")
         self._save_data()
         return hamper
 
@@ -718,11 +835,19 @@ class FoodBank:
             raise ValueError(f"Cannot unpack hamper {hamper_id} that has already been delivered.")
 
         # Return items to inventory
-        for it in hamper.items:
+        items_to_return = hamper.items
+        if isinstance(items_to_return, dict):
+            items_to_return = [{"name": k, "quantity": v} for k, v in items_to_return.items()]
+
+        for it in (items_to_return or []):
             if isinstance(it, dict):
                 item_id = it.get("item_id") or it.get("id")
                 item_name = it.get("name")
                 qty = float(it.get("quantity", 1))
+            elif isinstance(it, str):
+                item_id = None
+                item_name = it
+                qty = 1.0
             else:
                 item_id = getattr(it, "id", None)
                 item_name = getattr(it, "name", None)
@@ -738,6 +863,7 @@ class FoodBank:
                 self.add_stock(inv_item.id, qty, reason=f"Unpacked from Hamper #{hamper_id}")
 
         hamper.status = "created"
+        logging.info(f"Unpacked food hamper ID {hamper_id}, returned items to inventory")
         self._save_data()
         return hamper
 
@@ -767,6 +893,7 @@ class FoodBank:
         if hasattr(new_vol, "work") and hamper.id not in new_vol.work:
             new_vol.work.append(hamper.id)
 
+        logging.info(f"Volunteer ID {new_volunteer_id} took over delivery of food hamper ID {hamper_id}")
         self._save_data()
         return hamper
 
@@ -792,6 +919,7 @@ class FoodBank:
         if hasattr(new_vol, "work") and donation.id not in new_vol.work:
             new_vol.work.append(donation.id)
 
+        logging.info(f"Volunteer ID {new_volunteer_id} took over collection of donation ID {donation_id}")
         self._save_data()
         return donation
 
@@ -811,6 +939,7 @@ class FoodBank:
         if job not in new_vol.work:
             new_vol.work.append(job)
 
+        logging.info(f"Transferred job '{job}' from volunteer ID {old_volunteer_id} to volunteer ID {new_volunteer_id}")
         self._save_data()
         return True
 
@@ -818,12 +947,13 @@ class FoodBank:
         hamper = self.find_food_hamper_by_id(hamper_id)
         if hamper is None: return None
         hamper.status = status
+        logging.info(f"Updated food hamper ID {hamper_id} status to '{status}'")
         self._save_data()
         return hamper
 
     def get_available_hampers(self):
         """Returns food hampers that are created and not yet assigned to any client."""
-        unavailable = {"assigned", "delivered", "unavailable", "cancelled"}
+        unavailable = {"assigned", "delivered", "unavailable", "cancelled", "flagged", "issue"}
         result = []
         for h in self.food_hampers:
             curr_status = h.status[0] if isinstance(h.status, list) and h.status else (h.status or "")
@@ -840,6 +970,7 @@ class FoodBank:
         if not hasattr(volunteer, "work") or not isinstance(volunteer.work, list):
             volunteer.work = []
         volunteer.work.append(job)
+        logging.info(f"Assigned job '{job}' to volunteer ID {volunteer_id}")
         self._save_data()
         return volunteer
 
@@ -865,13 +996,13 @@ class FoodBank:
         check_hamper_id = job_str.replace("deliver_hamper_", "").replace("hamper_", "") if "hamper" in job_str else job
         check_donation_id = job_str.replace("collect_donation_", "").replace("donation_", "") if "donation" in job_str else job
 
-        # 1. Check if FoodHamper: if currently assigned/in hand, cannot delete!
+        # 1. Check if FoodHamper: if currently assigned/packed (in hand), cannot delete!
         hamper = self.find_food_hamper_by_id(check_hamper_id)
         if hamper is not None and hamper.volunteer_id is not None and str(hamper.volunteer_id) == str(volunteer.id):
             curr_status = hamper.status[0] if isinstance(hamper.status, list) and hamper.status else (hamper.status or "")
-            if str(curr_status).lower() == "assigned":
+            if str(curr_status).lower() in ("assigned", "packed"):
                 raise ValueError(
-                    f"Cannot remove job: Food hamper {check_hamper_id} is already in hand (assigned). "
+                    f"Cannot remove job: Food hamper {check_hamper_id} is already in progress ({curr_status}). "
                     "It must be delivered via deliver_food_hamper() or transferred via take_over_hamper()."
                 )
 
@@ -890,6 +1021,7 @@ class FoodBank:
             raise ValueError("Cannot remove job: item/task is already in progress/in hand.")
 
         volunteer.work.remove(job)
+        logging.info(f"Removed job '{job}' from volunteer ID {volunteer_id}")
         self._save_data()
         return True
 
@@ -907,15 +1039,16 @@ class FoodBank:
         if job not in volunteer.work:
             return False
 
-        # If it is an assigned food hamper, mark as delivered
+        # If it is an assigned/packed food hamper, mark as delivered
         hamper = self.find_food_hamper_by_id(job)
-        if hamper is not None and str(hamper.status).lower() == "assigned":
+        if hamper is not None and str(hamper.status).lower() in ("assigned", "packed"):
             hamper.status = "delivered"
 
         volunteer.work.remove(job)
         if job not in volunteer.completed_work:
             volunteer.completed_work.append(job)
 
+        logging.info(f"Completed job '{job}' for volunteer ID {volunteer_id}")
         self._save_data()
         return True
 
@@ -925,6 +1058,158 @@ class FoodBank:
         if volunteer is None:
             raise ValueError(f"Volunteer ID {volunteer_id} does not exist.")
         return getattr(volunteer, "completed_work", [])
+
+    # Issue tracking and resolution (Food Hampers & Donations).
+    def flag_hamper_issue(self, hamper_id, issue_description, volunteer_id=None, new_status="flagged"):
+        """Flags an issue on a food hamper, saving previous status and updating status to 'flagged'."""
+        hamper = self.find_food_hamper_by_id(hamper_id)
+        if hamper is None:
+            raise ValueError(f"Food hamper ID {hamper_id} does not exist.")
+        if not isinstance(issue_description, str) or not issue_description.strip():
+            raise ValueError("Issue description cannot be empty.")
+        if volunteer_id is not None and self.find_volunteer_by_id(volunteer_id) is None:
+            raise ValueError(f"Volunteer ID {volunteer_id} does not exist.")
+
+        curr_status = hamper.status[0] if isinstance(hamper.status, list) and hamper.status else (hamper.status or "created")
+        hamper.previous_status = curr_status
+        hamper.status = new_status
+        issue_record = {
+            "entity_type": "hamper",
+            "entity_id": hamper.id,
+            "issue": issue_description.strip(),
+            "volunteer_id": volunteer_id,
+            "reported_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "previous_status": curr_status,
+            "status": "open"
+        }
+        hamper.flagged_issue = issue_record
+        if not hasattr(hamper, "issue_history") or not isinstance(hamper.issue_history, list):
+            hamper.issue_history = []
+        hamper.issue_history.append(issue_record)
+
+        logging.info(f"Flagged issue on FoodHamper #{hamper_id} by volunteer {volunteer_id}: '{issue_description}' (Previous status: '{curr_status}', New status: '{new_status}')")
+        self._save_data()
+        return issue_record
+
+    def flag_donation_issue(self, donation_id, issue_description, volunteer_id=None, new_status="flagged"):
+        """Flags an issue on a donation, saving previous status and updating status to 'flagged'."""
+        donation = self.find_donation_by_id(donation_id)
+        if donation is None:
+            raise ValueError(f"Donation ID {donation_id} does not exist.")
+        if not isinstance(issue_description, str) or not issue_description.strip():
+            raise ValueError("Issue description cannot be empty.")
+        if volunteer_id is not None and self.find_volunteer_by_id(volunteer_id) is None:
+            raise ValueError(f"Volunteer ID {volunteer_id} does not exist.")
+
+        curr_status = donation.status[0] if isinstance(donation.status, list) and donation.status else (donation.status or "created")
+        donation.previous_status = curr_status
+        donation.status = new_status
+        issue_record = {
+            "entity_type": "donation",
+            "entity_id": donation.id,
+            "issue": issue_description.strip(),
+            "volunteer_id": volunteer_id,
+            "reported_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "previous_status": curr_status,
+            "status": "open"
+        }
+        donation.flagged_issue = issue_record
+        if not hasattr(donation, "issue_history") or not isinstance(donation.issue_history, list):
+            donation.issue_history = []
+        donation.issue_history.append(issue_record)
+
+        logging.info(f"Flagged issue on Donation #{donation_id} by volunteer {volunteer_id}: '{issue_description}' (Previous status: '{curr_status}', New status: '{new_status}')")
+        self._save_data()
+        return issue_record
+
+    def flag_issue(self, entity_type, entity_id, issue_description, volunteer_id=None, new_status="flagged"):
+        """Flags an issue on either a food hamper or donation, modifying its status."""
+        clean_type = str(entity_type).strip().lower()
+        if clean_type in ("hamper", "food_hamper", "foodhamper"):
+            return self.flag_hamper_issue(entity_id, issue_description, volunteer_id=volunteer_id, new_status=new_status)
+        elif clean_type in ("donation", "donations"):
+            return self.flag_donation_issue(entity_id, issue_description, volunteer_id=volunteer_id, new_status=new_status)
+        else:
+            raise ValueError(f"Unsupported entity type '{entity_type}'. Must be 'hamper' or 'donation'.")
+
+    def resolve_hamper_issue(self, hamper_id, resolution_notes="", resolved_by=None, restore_status=None):
+        """Resolves a flagged issue on a food hamper and restores its status to previous or specified status."""
+        hamper = self.find_food_hamper_by_id(hamper_id)
+        if hamper is None:
+            raise ValueError(f"Food hamper ID {hamper_id} does not exist.")
+
+        target_status = restore_status or getattr(hamper, "previous_status", None) or "created"
+        hamper.status = target_status
+        if getattr(hamper, "flagged_issue", None):
+            hamper.flagged_issue["status"] = "resolved"
+            hamper.flagged_issue["resolved_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            hamper.flagged_issue["resolution_notes"] = resolution_notes
+            hamper.flagged_issue["resolved_by"] = resolved_by
+        hamper.flagged_issue = None
+
+        logging.info(f"Resolved issue on FoodHamper #{hamper_id}, restored status to '{target_status}'")
+        self._save_data()
+        return hamper
+
+    def resolve_donation_issue(self, donation_id, resolution_notes="", resolved_by=None, restore_status=None):
+        """Resolves a flagged issue on a donation and restores its status to previous or specified status."""
+        donation = self.find_donation_by_id(donation_id)
+        if donation is None:
+            raise ValueError(f"Donation ID {donation_id} does not exist.")
+
+        target_status = restore_status or getattr(donation, "previous_status", None) or "created"
+        donation.status = target_status
+        if getattr(donation, "flagged_issue", None):
+            donation.flagged_issue["status"] = "resolved"
+            donation.flagged_issue["resolved_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            donation.flagged_issue["resolution_notes"] = resolution_notes
+            donation.flagged_issue["resolved_by"] = resolved_by
+        donation.flagged_issue = None
+
+        logging.info(f"Resolved issue on Donation #{donation_id}, restored status to '{target_status}'")
+        self._save_data()
+        return donation
+
+    def resolve_issue(self, entity_type, entity_id, resolution_notes="", resolved_by=None, restore_status=None):
+        """Resolves a flagged issue on either a food hamper or donation, restoring original status."""
+        clean_type = str(entity_type).strip().lower()
+        if clean_type in ("hamper", "food_hamper", "foodhamper"):
+            return self.resolve_hamper_issue(entity_id, resolution_notes=resolution_notes, resolved_by=resolved_by, restore_status=restore_status)
+        elif clean_type in ("donation", "donations"):
+            return self.resolve_donation_issue(entity_id, resolution_notes=resolution_notes, resolved_by=resolved_by, restore_status=restore_status)
+        else:
+            raise ValueError(f"Unsupported entity type '{entity_type}'. Must be 'hamper' or 'donation'.")
+
+    def get_flagged_issues(self, entity_type=None):
+        """Returns all open flagged issues across food hampers and donations."""
+        issues = []
+        clean_type = str(entity_type).strip().lower() if entity_type else None
+
+        if clean_type in (None, "hamper", "food_hamper", "foodhamper"):
+            for h in self.food_hampers:
+                if getattr(h, "flagged_issue", None) and h.flagged_issue.get("status") == "open":
+                    issues.append(h.flagged_issue)
+                elif str(getattr(h, "status", "")).lower() == "flagged":
+                    issues.append({
+                        "entity_type": "hamper",
+                        "entity_id": h.id,
+                        "status": "open",
+                        "issue": getattr(h, "description", "")
+                    })
+
+        if clean_type in (None, "donation", "donations"):
+            for d in self.donations:
+                if getattr(d, "flagged_issue", None) and d.flagged_issue.get("status") == "open":
+                    issues.append(d.flagged_issue)
+                elif str(getattr(d, "status", "")).lower() == "flagged":
+                    issues.append({
+                        "entity_type": "donation",
+                        "entity_id": d.id,
+                        "status": "open",
+                        "issue": getattr(d, "description", "")
+                    })
+
+        return issues
 
     # Client Messaging management.
     def send_client_message(self, client_id, content):
@@ -946,6 +1231,7 @@ class FoodBank:
             "is_edited": False
         }
         client.messages.append(message)
+        logging.info(f"Client ID {client_id} sent message ID {message['id']}")
         self._save_data()
         return message
 
@@ -973,6 +1259,7 @@ class FoodBank:
         target_msg["timestamp"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         target_msg["is_edited"] = True
 
+        logging.info(f"Client ID {client_id} edited message ID {message_id} at {target_msg['timestamp']}")
         self._save_data()
         return target_msg
 
@@ -1009,14 +1296,16 @@ class FoodBank:
             raise ValueError(f"Client ID {client_id} does not exist.")
         if hasattr(client, "messages"):
             client.messages = [m for m in client.messages if str(m.get("id")) != str(message_id)]
+            logging.info(f"Deleted message ID {message_id} for client ID {client_id}")
             self._save_data()
             return True
         return False
 
     # Inventory proxy management (with auto-persistence).
-    def add_inventory_item(self, name, category, quantity=0, unit="pcs", min_quantity=0):
+    def add_inventory_item(self, name, category, quantity=0, unit="pcs", min_quantity=None):
         """Adds a new item or updates an existing item in inventory, with auto-save."""
         item = self.inventory.add_item(name, category, quantity=quantity, unit=unit, min_quantity=min_quantity)
+        logging.info(f"Added/updated inventory item '{item.name}' (ID: {item.id}, Quantity: {item.quantity}) via FoodBank")
         self._save_data()
         return item
 
@@ -1024,6 +1313,7 @@ class FoodBank:
         """Adds stock quantity to an inventory item, with auto-save."""
         result = self.inventory.add_stock(item_id, quantity, reason=reason)
         if result:
+            logging.info(f"Added {quantity} stock to item ID {item_id} (Reason: '{reason}') via FoodBank")
             self._save_data()
         return result
 
@@ -1031,6 +1321,7 @@ class FoodBank:
         """Deducts stock quantity from an inventory item, with auto-save."""
         result = self.inventory.remove_stock(item_id, quantity, reason=reason)
         if result:
+            logging.info(f"Removed {quantity} stock from item ID {item_id} (Reason: '{reason}') via FoodBank")
             self._save_data()
         return result
 
@@ -1045,6 +1336,201 @@ class FoodBank:
     def get_stock_records(self, item_id=None):
         """Returns inventory transaction audit logs."""
         return self.inventory.get_stock_records(item_id=item_id)
+
+    # CSV Export and Reporting Management.
+    def _format_item_summary(self, items):
+        """Formats an item list or dictionary into a human-readable summary string for CSV export."""
+        if not items:
+            return "None"
+        if isinstance(items, dict):
+            return "; ".join([f"{k}: {v}" for k, v in items.items()])
+        formatted = []
+        for it in items:
+            if isinstance(it, dict):
+                name = it.get("name") or it.get("item_name") or f"Item #{it.get('item_id', '')}"
+                qty = it.get("quantity", 1)
+                unit = it.get("unit", "")
+                formatted.append(f"{name}: {qty} {unit}".strip())
+            elif isinstance(it, str):
+                formatted.append(it)
+            else:
+                name = getattr(it, "name", f"Item #{getattr(it, 'id', '')}")
+                qty = getattr(it, "quantity", 1)
+                unit = getattr(it, "unit", "")
+                formatted.append(f"{name}: {qty} {unit}".strip())
+        return "; ".join(formatted) if formatted else "None"
+
+    def export_inventory_csv(self, filepath=None):
+        """Exports current inventory items and stock alert status to a CSV file."""
+        if filepath is None:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            filepath = Path("reports") / f"inventory_report_{timestamp}.csv"
+        else:
+            filepath = Path(filepath)
+
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        headers = ["Item ID", "Name", "Category", "Quantity", "Unit", "Min Quantity", "Stock Status"]
+
+        with filepath.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(headers)
+            for item in self.inventory.items:
+                if item.quantity <= 0:
+                    status = "Out of Stock"
+                elif item.quantity <= item.min_quantity:
+                    status = "Low Stock"
+                else:
+                    status = "Normal"
+                writer.writerow([
+                    item.id, item.name, item.category, item.quantity, item.unit, item.min_quantity, status
+                ])
+
+        logging.info(f"Exported inventory report to {filepath} ({len(self.inventory.items)} items)")
+        return str(filepath)
+
+    def export_transactions_csv(self, filepath=None):
+        """Exports inventory stock change transaction history to a CSV file."""
+        if filepath is None:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            filepath = Path("reports") / f"stock_transactions_{timestamp}.csv"
+        else:
+            filepath = Path(filepath)
+
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        headers = [
+            "Record ID", "Timestamp", "Item ID", "Item Name",
+            "Change Type", "Quantity Changed", "Previous Quantity", "New Quantity", "Reason"
+        ]
+
+        with filepath.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(headers)
+            for r in self.inventory.stock_records:
+                item = self.inventory.find_item_by_id(r.get("item_id"))
+                item_name = item.name if item else "Unknown"
+                writer.writerow([
+                    r.get("id"), r.get("timestamp"), r.get("item_id"), item_name,
+                    r.get("change_type"), r.get("quantity"), r.get("previous_quantity"),
+                    r.get("new_quantity"), r.get("reason", "")
+                ])
+
+        logging.info(f"Exported stock transactions to {filepath} ({len(self.inventory.stock_records)} records)")
+        return str(filepath)
+
+    def export_hampers_csv(self, filepath=None):
+        """Exports food hamper distribution records and status to a CSV file."""
+        if filepath is None:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            filepath = Path("reports") / f"food_hampers_report_{timestamp}.csv"
+        else:
+            filepath = Path(filepath)
+
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        headers = [
+            "Hamper ID", "Description", "Client ID", "Client Name",
+            "Volunteer ID", "Volunteer Name", "Status", "Items", "Flagged Issue"
+        ]
+
+        with filepath.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(headers)
+            for h in self.food_hampers:
+                client = self.find_client_by_id(h.client_id) if h.client_id else None
+                client_name = client.name if client else "Unassigned"
+                vol = self.find_volunteer_by_id(h.volunteer_id) if h.volunteer_id else None
+                vol_name = vol.name if vol else "Unassigned"
+                status_str = h.status[0] if isinstance(h.status, list) and h.status else (h.status or "created")
+                items_str = self._format_item_summary(h.items)
+                issue_str = h.flagged_issue.get("issue", "") if getattr(h, "flagged_issue", None) else "None"
+
+                writer.writerow([
+                    h.id, h.description, h.client_id or "", client_name,
+                    h.volunteer_id or "", vol_name, status_str, items_str, issue_str
+                ])
+
+        logging.info(f"Exported food hampers report to {filepath} ({len(self.food_hampers)} hampers)")
+        return str(filepath)
+
+    def export_donations_csv(self, filepath=None):
+        """Exports donations records and status to a CSV file."""
+        if filepath is None:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            filepath = Path("reports") / f"donations_report_{timestamp}.csv"
+        else:
+            filepath = Path(filepath)
+
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        headers = [
+            "Donation ID", "Description", "Donor ID", "Donor Name",
+            "Volunteer ID", "Volunteer Name", "Status", "Items", "Flagged Issue"
+        ]
+
+        with filepath.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(headers)
+            for d in self.donations:
+                donor = self.find_donor_by_id(d.donor_id) if d.donor_id else None
+                donor_name = donor.name if donor else "Anonymous"
+                vol = self.find_volunteer_by_id(d.volunteer_id) if d.volunteer_id else None
+                vol_name = vol.name if vol else "Unassigned"
+                status_str = d.status[0] if isinstance(d.status, list) and d.status else (d.status or "created")
+                items_str = self._format_item_summary(d.items)
+                issue_str = d.flagged_issue.get("issue", "") if getattr(d, "flagged_issue", None) else "None"
+
+                writer.writerow([
+                    d.id, d.description, d.donor_id or "", donor_name,
+                    d.volunteer_id or "", vol_name, status_str, items_str, issue_str
+                ])
+
+        logging.info(f"Exported donations report to {filepath} ({len(self.donations)} donations)")
+        return str(filepath)
+
+    def export_volunteers_csv(self, filepath=None):
+        """Exports volunteer activity and task completion statistics to a CSV file."""
+        if filepath is None:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            filepath = Path("reports") / f"volunteers_report_{timestamp}.csv"
+        else:
+            filepath = Path(filepath)
+
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        headers = [
+            "Volunteer ID", "Name", "Email",
+            "Active Jobs Count", "Active Job IDs",
+            "Completed Jobs Count", "Completed Job IDs"
+        ]
+
+        with filepath.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(headers)
+            for v in self.volunteers:
+                active_jobs = getattr(v, "work", []) or []
+                completed_jobs = getattr(v, "completed_work", []) or []
+                writer.writerow([
+                    v.id, v.name, getattr(v, "email", ""),
+                    len(active_jobs), "; ".join(map(str, active_jobs)) if active_jobs else "None",
+                    len(completed_jobs), "; ".join(map(str, completed_jobs)) if completed_jobs else "None"
+                ])
+
+        logging.info(f"Exported volunteers report to {filepath} ({len(self.volunteers)} volunteers)")
+        return str(filepath)
+
+    def export_all_reports(self, output_dir="reports"):
+        """Generates and exports all 5 core CSV reports into the specified directory."""
+        out_path = Path(output_dir)
+        out_path.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        generated = {
+            "inventory": self.export_inventory_csv(out_path / f"inventory_report_{timestamp}.csv"),
+            "transactions": self.export_transactions_csv(out_path / f"stock_transactions_{timestamp}.csv"),
+            "food_hampers": self.export_hampers_csv(out_path / f"food_hampers_report_{timestamp}.csv"),
+            "donations": self.export_donations_csv(out_path / f"donations_report_{timestamp}.csv"),
+            "volunteers": self.export_volunteers_csv(out_path / f"volunteers_report_{timestamp}.csv"),
+        }
+
+        logging.info(f"Exported all 5 master reports to directory '{out_path}' (Timestamp: {timestamp})")
+        return generated
 
     def get_system_summary(self):
         return {
@@ -1093,3 +1579,7 @@ class FoodBank:
                 issues.append(f"Donation {donation.id} references missing volunteer {donation.volunteer_id}.")
 
         return issues
+
+
+# Functional class aliases
+FoodBankManager = FoodBank

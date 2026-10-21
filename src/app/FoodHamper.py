@@ -6,3 +6,6 @@ class FoodHamper:
         self.status = status
         self.volunteer_id = volunteer_id
         self.items = []
+        self.flagged_issue = None
+        self.previous_status = None
+        self.issue_history = []
