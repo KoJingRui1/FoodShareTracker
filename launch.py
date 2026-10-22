@@ -10,6 +10,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.app.FoodBank import FoodBankManager
 from src.gui.new_system_page import show_new_system_page
 from src.gui.main_page import show_main_page
+from src.gui.admin_page import show_admin_page
 
 
 def launch():
@@ -36,10 +37,16 @@ def launch():
         # No data file exists yet; treat system as brand new (next_user_id == 0)
         next_user_id = 0
 
-    # Route to new system setup if next_user_id is 0, else go to main page
+    # Initialize current_page state if not yet set
+    if "current_page" not in st.session_state:
+        st.session_state.current_page = "new_system" if next_user_id == 0 else "main"
+
+    # Route based on system status and session page
     if next_user_id == 0:
         st.session_state.current_page = "new_system"
         show_new_system_page(manager)
+    elif st.session_state.current_page == "admin":
+        show_admin_page(manager)
     else:
         st.session_state.current_page = "main"
         show_main_page(manager)

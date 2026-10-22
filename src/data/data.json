@@ -6,8 +6,8 @@
     "admins": [
         {
             "id": 1,
-            "name": "aaa",
-            "password": "$2b$12$7Iw1k.26Ut5olvoCJNiAy.Yi8YuBj/jTr8QmgNU0ixaslRfZw4Aim",
+            "name": "aa",
+            "password": "$2b$12$oXv6ASIVb95YzTMoDPD.O.cBG3yNmhY9WKETdh60jQeb48EmpS8UO",
             "email": "aaa@aa.com",
             "profile_image": "assets/default_avatar.png"
         }

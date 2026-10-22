@@ -61,7 +61,7 @@ def show_new_system_page(manager):
             admin = manager.add_admin(name=name.strip(), password=password, email=clean_email)
             st.success(f"First administrator '{admin.name}' successfully created!")
             st.session_state.user = admin
-            st.session_state.current_page = "main"
+            st.session_state.current_page = "admin"
             st.rerun()
         except Exception as e:
             st.error(f"Failed to create administrator: {e}")
