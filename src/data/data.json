@@ -1,0 +1,38 @@
+{
+    "address": "",
+    "description": "",
+    "collection_centers": [],
+    "applications": [],
+    "admins": [
+        {
+            "id": 1,
+            "name": "aaa",
+            "password": "$2b$12$7Iw1k.26Ut5olvoCJNiAy.Yi8YuBj/jTr8QmgNU0ixaslRfZw4Aim",
+            "email": "aaa@aa.com",
+            "profile_image": "assets/default_avatar.png"
+        }
+    ],
+    "donors": [],
+    "staffs": [],
+    "volunteers": [],
+    "clients": [],
+    "donations": [],
+    "food_hampers": [],
+    "food_bank_data": {
+        "next_user_id": 2,
+        "next_donation_id": 1,
+        "next_food_hamper_id": 1,
+        "next_application_id": 1,
+        "address": "",
+        "description": "",
+        "collection_centers": []
+    },
+    "inventory": {
+        "items": [],
+        "stock_records": [],
+        "inventory_data": {
+            "next_item_id": 1,
+            "next_record_id": 1
+        }
+    }
+}

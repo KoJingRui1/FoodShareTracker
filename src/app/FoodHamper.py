@@ -9,3 +9,4 @@ class FoodHamper:
         self.flagged_issue = None
         self.previous_status = None
         self.issue_history = []
+        self.status_history = []

@@ -81,6 +81,17 @@ class FoodBank:
         """Helper to check if string is bcrypt hash."""
         return is_bcrypt_hash(stored_hash)
 
+    @staticmethod
+    def _update_status(entity, new_status):
+        """Updates entity status and records entry in status_history."""
+        entity.status = new_status
+        if not hasattr(entity, "status_history") or not isinstance(entity.status_history, list):
+            entity.status_history = []
+        entity.status_history.append({
+            "status": new_status,
+            "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        })
+
     def __init__(self, data_path=None):
         # Default path: <project root>/src/data/data.json.
         project_root = Path(__file__).resolve().parent
@@ -106,10 +117,18 @@ class FoodBank:
         self.donations = []
         self.food_hampers = []
         self.inventory = Inventory()
+        self.address = ""
+        self.description = ""
+        self.collection_centers = []
+        self.applications = []
         self.food_bank_data = {
             "next_user_id": 1,
             "next_donation_id": 1,
             "next_food_hamper_id": 1,
+            "next_application_id": 1,
+            "address": "",
+            "description": "",
+            "collection_centers": [],
         }
 
     def _load_data(self):
@@ -168,14 +187,23 @@ class FoodBank:
                 self.volunteers.append(volunteer)
 
             for client_data in data.get("clients", []):
+                raw_address = client_data.get("address", "")
+                if isinstance(raw_address, list):
+                    client_address = str(raw_address[0]).strip() if raw_address and str(raw_address[0]).strip() else ""
+                elif raw_address is None:
+                    client_address = ""
+                else:
+                    client_address = str(raw_address).strip()
+
                 client = ClientUser(
                     client_data["id"], client_data["name"],
                     client_data["password"], client_data["email"],
                     description=client_data.get("description", ""),
+                    address=client_address,
                     profile_image=client_data.get("profile_image", "assets/default_avatar.png")
                 )
                 client.allergy = client_data.get("allergy", [])
-                client.address = client_data.get("address", [])
+                client.address = client_address
                 client.receive = client_data.get("receive", [])
                 client.messages = client_data.get("messages", [])
                 self.clients.append(client)
@@ -192,11 +220,12 @@ class FoodBank:
                 donation.flagged_issue = donation_data.get("flagged_issue", None)
                 donation.previous_status = donation_data.get("previous_status", None)
                 donation.issue_history = donation_data.get("issue_history", [])
+                donation.status_history = donation_data.get("status_history", [])
                 self.donations.append(donation)
 
             for hamper_data in data.get("food_hampers", []):
                 raw_status = hamper_data.get("status", "created")
-                status = raw_status[0] if isinstance(raw_status, list) and raw_status else (raw_status or "created")
+                status = raw_status[0] if isinstance(raw_status, list) and hamper_data else (raw_status or "created")
                 hamper = FoodHamper(
                     hamper_data["id"], hamper_data.get("client_id"),
                     hamper_data["description"], status=status,
@@ -206,6 +235,7 @@ class FoodBank:
                 hamper.flagged_issue = hamper_data.get("flagged_issue", None)
                 hamper.previous_status = hamper_data.get("previous_status", None)
                 hamper.issue_history = hamper_data.get("issue_history", [])
+                hamper.status_history = hamper_data.get("status_history", [])
                 self.food_hampers.append(hamper)
 
             self.food_bank_data = data.get("food_bank_data", {
@@ -213,6 +243,26 @@ class FoodBank:
                 "next_donation_id": 1,
                 "next_food_hamper_id": 1,
             })
+            self.address = data.get("address") or self.food_bank_data.get("address", "")
+            self.description = data.get("description") or self.food_bank_data.get("description", "")
+            raw_centers = data.get("collection_centers") or self.food_bank_data.get("collection_centers", [])
+            self.collection_centers = []
+            if isinstance(raw_centers, list):
+                for c in raw_centers:
+                    if isinstance(c, dict):
+                        self.collection_centers.append({
+                            "name": str(c.get("name", "")),
+                            "address": str(c.get("address", ""))
+                        })
+                    elif isinstance(c, str):
+                        self.collection_centers.append({"name": c, "address": ""})
+            self.food_bank_data["address"] = self.address
+            self.food_bank_data["description"] = self.description
+            self.food_bank_data["collection_centers"] = self.collection_centers
+
+            # Load volunteer applications
+            raw_apps = data.get("applications", [])
+            self.applications = raw_apps if isinstance(raw_apps, list) else []
 
             # Load inventory data safely inside try block (handles both list and dict formats).
             raw_inventory = data.get("inventory", {})
@@ -252,7 +302,14 @@ class FoodBank:
 
     def _save_data(self):
         """Save the collections and system counters as JSON, like ScheduleManager."""
+        self.food_bank_data["address"] = self.address
+        self.food_bank_data["description"] = self.description
+        self.food_bank_data["collection_centers"] = self.collection_centers
         data_to_save = {
+            "address": self.address,
+            "description": self.description,
+            "collection_centers": self.collection_centers,
+            "applications": self.applications,
             "admins": [admin.__dict__ for admin in self.admins],
             "donors": [donor.__dict__ for donor in self.donors],
             "staffs": [staff.__dict__ for staff in self.staffs],
@@ -356,7 +413,7 @@ class FoodBank:
         return self._add_user(StaffUser, self.staffs, name, password, email, profile_image=profile_image)
     def add_volunteer(self, name, password, email, profile_image="assets/default_avatar.png"): 
         return self._add_user(VolunteerUser, self.volunteers, name, password, email, profile_image=profile_image)
-    def add_client(self, name, password, email, description="", profile_image="assets/default_avatar.png"): 
+    def add_client(self, name, password, email, description="", address="", profile_image="assets/default_avatar.png"): 
         if self.find_user_by_email(email) is not None:
             raise ValueError(f"Email '{email}' is already registered.")
         hashed_password = hash_password(password) if not is_bcrypt_hash(password) else password
@@ -366,6 +423,7 @@ class FoodBank:
             hashed_password,
             email,
             description=description,
+            address=address,
             profile_image=profile_image
         )
         self.clients.append(user)
@@ -373,6 +431,115 @@ class FoodBank:
         logging.info(f"Added client: {user.name} (ID: {user.id}, Email: {user.email})")
         self._save_data()
         return user
+
+    # Volunteer Application management.
+    @property
+    def application(self):
+        """Property alias for applications list."""
+        return self.applications
+
+    @application.setter
+    def application(self, value):
+        self.applications = value
+
+    def find_application_by_id(self, application_id):
+        """Finds an application by its ID."""
+        for app in self.applications:
+            if str(app.get("id")) == str(application_id):
+                return app
+        return None
+
+    def apply_volunteer(self, name, password, email, description="", profile_image="assets/default_avatar.png"):
+        """Submits an application to become a volunteer with a personal description and no initial jobs."""
+        if not name or not str(name).strip():
+            raise ValueError("Applicant name cannot be empty.")
+        if not email or not str(email).strip():
+            raise ValueError("Applicant email cannot be empty.")
+        if self.find_user_by_email(email) is not None:
+            raise ValueError(f"Email '{email}' is already registered.")
+
+        for app in self.applications:
+            if app.get("email", "").lower() == email.strip().lower() and app.get("status") == "pending":
+                raise ValueError(f"An application for email '{email}' is already pending review.")
+
+        hashed_password = hash_password(password) if not is_bcrypt_hash(password) else password
+        app_id = self.food_bank_data.get("next_application_id", 1)
+        application = {
+            "id": app_id,
+            "name": str(name).strip(),
+            "password": hashed_password,
+            "email": str(email).strip(),
+            "description": str(description or "").strip(),
+            "profile_image": profile_image,
+            "status": "pending",
+            "submitted_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        self.applications.append(application)
+        self.food_bank_data["next_application_id"] = app_id + 1
+        logging.info(f"Submitted volunteer application ID {app_id} for {name} ({email})")
+        self._save_data()
+        return application
+
+    # Functional aliases for applying
+    submit_volunteer_application = apply_volunteer
+    add_volunteer_application = apply_volunteer
+    add_application = apply_volunteer
+
+    def approve_volunteer_application(self, application_id):
+        """Approves a volunteer application and registers the applicant as a VolunteerUser with no initial jobs."""
+        app = self.find_application_by_id(application_id)
+        if app is None:
+            raise ValueError(f"Application ID {application_id} does not exist.")
+
+        if app.get("status") == "approved":
+            raise ValueError(f"Application ID {application_id} has already been approved.")
+
+        if self.find_user_by_email(app["email"]) is not None:
+            raise ValueError(f"Email '{app['email']}' is already registered.")
+
+        # Create new VolunteerUser without initial jobs
+        volunteer = self.add_volunteer(
+            name=app["name"],
+            password=app["password"],
+            email=app["email"],
+            profile_image=app.get("profile_image", "assets/default_avatar.png")
+        )
+
+        app["status"] = "approved"
+        app["approved_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        app["user_id"] = volunteer.id
+
+        logging.info(f"Approved application ID {application_id}: Created volunteer {volunteer.name} (ID: {volunteer.id})")
+        self._save_data()
+        return volunteer
+
+    # Functional alias for approving
+    approve_application = approve_volunteer_application
+
+    def delete_volunteer_application(self, application_id):
+        """Deletes/removes a volunteer application from the system."""
+        app = self.find_application_by_id(application_id)
+        if app is None:
+            return False
+        self.applications.remove(app)
+        logging.info(f"Deleted volunteer application ID {application_id}")
+        self._save_data()
+        return True
+
+    # Functional aliases for deleting
+    delete_application = delete_volunteer_application
+    remove_application = delete_volunteer_application
+
+    def get_applications(self, status=None):
+        """Returns list of applications, optionally filtered by status ('pending', 'approved', etc.)."""
+        if status is None:
+            return self.applications
+        clean_status = str(status).strip().lower()
+        return [app for app in self.applications if app.get("status", "").lower() == clean_status]
+
+    def get_pending_applications(self):
+        """Returns list of all pending volunteer applications."""
+        return self.get_applications(status="pending")
 
     def get_all_users(self):
         """Returns a combined list of all users across all role collections."""
@@ -443,7 +610,7 @@ class FoodBank:
                             # Assigned or packed hamper cannot be deleted; unbind client
                             hamper.client_id = None
                             if str(curr_status).lower() == "assigned":
-                                hamper.status = "created"
+                                self._update_status(hamper, "created")
                             retained_hampers.append(hamper)
                     else:
                         retained_hampers.append(hamper)
@@ -499,6 +666,13 @@ class FoodBank:
                     raise ValueError(f"Email '{value}' is already in use by another user.")
             if field == "password" and value and not is_bcrypt_hash(value):
                 value = hash_password(value)
+            if isinstance(user, ClientUser) and field == "address":
+                if isinstance(value, list):
+                    value = str(value[0]).strip() if value and str(value[0]).strip() else ""
+                elif value is None:
+                    value = ""
+                else:
+                    value = str(value).strip()
             setattr(user, field, value)
         logging.info(f"Updated user ID {user_id}: {fields}")
         self._save_data()
@@ -521,6 +695,7 @@ class FoodBank:
                 donation.items = [{"name": k, "quantity": v} for k, v in items.items()]
             else:
                 donation.items = list(items)
+        self._update_status(donation, "created")
         self.donations.append(donation)
         if hasattr(donor, "donation") and donation.id not in donor.donation:
             donor.donation.append(donation.id)
@@ -538,7 +713,7 @@ class FoodBank:
         if volunteer is None:
             raise ValueError(f"Volunteer ID {volunteer_id} does not exist.")
         
-        donation.status = "collected"
+        self._update_status(donation, "collected")
         donation.volunteer_id = volunteer.id
         if hasattr(volunteer, "work") and donation.id not in volunteer.work:
             volunteer.work.append(donation.id)
@@ -580,7 +755,7 @@ class FoodBank:
                 new_item = self.add_inventory_item(name, category, quantity, unit=unit)
                 stocked_items.append({"item_id": new_item.id, "name": name, "quantity": quantity})
 
-        donation.status = "stocked"
+        self._update_status(donation, "stocked")
         logging.info(f"Stocked donation ID {donation_id} into inventory ({len(stocked_items)} items)")
         self._save_data()
         return stocked_items
@@ -596,7 +771,10 @@ class FoodBank:
                 raise ValueError(f"Donor ID {value} does not exist.")
             if field == "volunteer_id" and value not in (None, "", 0) and self.find_volunteer_by_id(value) is None:
                 raise ValueError(f"Volunteer ID {value} does not exist.")
-            setattr(donation, field, value)
+            if field == "status":
+                self._update_status(donation, value)
+            else:
+                setattr(donation, field, value)
         logging.info(f"Updated donation ID {donation_id}: {fields}")
         self._save_data()
         return donation
@@ -661,6 +839,7 @@ class FoodBank:
             if hasattr(vol, "work") and hamper.id not in vol.work:
                 vol.work.append(hamper.id)
 
+        self._update_status(hamper, status)
         self.food_hampers.append(hamper)
         self.food_bank_data["next_food_hamper_id"] += 1
         logging.info(f"Added food hamper ID {hamper.id} (Status: '{hamper.status}')")
@@ -678,7 +857,10 @@ class FoodBank:
                 raise ValueError(f"Client ID {value} does not exist.")
             if field == "volunteer_id" and value not in (None, "", 0) and self.find_volunteer_by_id(value) is None:
                 raise ValueError(f"Volunteer ID {value} does not exist.")
-            setattr(hamper, field, value)
+            if field == "status":
+                self._update_status(hamper, value)
+            else:
+                setattr(hamper, field, value)
         logging.info(f"Updated food hamper ID {hamper_id}: {fields}")
         self._save_data()
         return hamper
@@ -728,7 +910,7 @@ class FoodBank:
 
         hamper.client_id = client.id
         if str(curr_status).lower() != "packed":
-            hamper.status = "assigned"
+            self._update_status(hamper, "assigned")
         if hasattr(client, "receive") and hamper.id not in client.receive:
             client.receive.append(hamper.id)
         logging.info(f"Assigned food hamper ID {hamper_id} to client ID {client_id} (Volunteer: {volunteer_id})")
@@ -751,7 +933,7 @@ class FoodBank:
             if str(hamper.volunteer_id) != str(volunteer_id):
                 raise PermissionError(f"Volunteer {volunteer_id} is not the assigned volunteer for hamper {hamper_id}.")
 
-        hamper.status = "delivered"
+        self._update_status(hamper, "delivered")
         logging.info(f"Delivered food hamper ID {hamper_id} to client")
 
         # Complete work in the assigned volunteer's list (moves to completed_work)
@@ -819,7 +1001,7 @@ class FoodBank:
             self.remove_stock(inv_item.id, qty, reason=f"Packed for Hamper #{hamper_id}")
 
         hamper.items = list(items_to_pack)
-        hamper.status = "packed"
+        self._update_status(hamper, "packed")
         logging.info(f"Packed food hamper ID {hamper_id} with {len(items_to_pack)} items")
         self._save_data()
         return hamper
@@ -862,7 +1044,7 @@ class FoodBank:
             if inv_item:
                 self.add_stock(inv_item.id, qty, reason=f"Unpacked from Hamper #{hamper_id}")
 
-        hamper.status = "created"
+        self._update_status(hamper, "created")
         logging.info(f"Unpacked food hamper ID {hamper_id}, returned items to inventory")
         self._save_data()
         return hamper
@@ -915,7 +1097,7 @@ class FoodBank:
 
         # Transfer to new volunteer and set status
         donation.volunteer_id = new_vol.id
-        donation.status = "collected"
+        self._update_status(donation, "collected")
         if hasattr(new_vol, "work") and donation.id not in new_vol.work:
             new_vol.work.append(donation.id)
 
@@ -946,7 +1128,7 @@ class FoodBank:
     def update_hamper_status(self, hamper_id, status):
         hamper = self.find_food_hamper_by_id(hamper_id)
         if hamper is None: return None
-        hamper.status = status
+        self._update_status(hamper, status)
         logging.info(f"Updated food hamper ID {hamper_id} status to '{status}'")
         self._save_data()
         return hamper
@@ -1042,7 +1224,7 @@ class FoodBank:
         # If it is an assigned/packed food hamper, mark as delivered
         hamper = self.find_food_hamper_by_id(job)
         if hamper is not None and str(hamper.status).lower() in ("assigned", "packed"):
-            hamper.status = "delivered"
+            self._update_status(hamper, "delivered")
 
         volunteer.work.remove(job)
         if job not in volunteer.completed_work:
@@ -1059,6 +1241,159 @@ class FoodBank:
             raise ValueError(f"Volunteer ID {volunteer_id} does not exist.")
         return getattr(volunteer, "completed_work", [])
 
+    # Volunteer self-service claiming and task pool management.
+    def get_claimable_hampers(self):
+        """Returns food hampers that are ready for delivery and have not been claimed by any volunteer."""
+        claimable = []
+        for h in self.food_hampers:
+            curr_status = h.status[0] if isinstance(h.status, list) and h.status else (h.status or "")
+            has_no_volunteer = h.volunteer_id in (None, "", 0)
+            has_client = h.client_id not in (None, "", 0)
+            valid_status = str(curr_status).lower() in ("assigned", "packed", "created")
+            is_not_flagged = getattr(h, "flagged_issue", None) is None
+            if has_no_volunteer and has_client and valid_status and is_not_flagged:
+                claimable.append(h)
+        return claimable
+
+    def get_claimable_donations(self):
+        """Returns donations that need collection and have not been claimed by any volunteer."""
+        claimable = []
+        for d in self.donations:
+            curr_status = d.status[0] if isinstance(d.status, list) and d.status else (d.status or "")
+            has_no_volunteer = d.volunteer_id in (None, "", 0)
+            valid_status = str(curr_status).lower() in ("created", "pending")
+            is_not_flagged = getattr(d, "flagged_issue", None) is None
+            if has_no_volunteer and valid_status and is_not_flagged:
+                claimable.append(d)
+        return claimable
+
+    def get_all_claimable_jobs(self):
+        """Returns all open, claimable delivery and collection tasks."""
+        return {
+            "hampers": self.get_claimable_hampers(),
+            "donations": self.get_claimable_donations(),
+        }
+
+    def claim_hamper(self, volunteer_id, hamper_id):
+        """Allows a volunteer to claim/accept a food hamper delivery job."""
+        volunteer = self.find_volunteer_by_id(volunteer_id)
+        if volunteer is None:
+            raise ValueError(f"Volunteer ID {volunteer_id} does not exist.")
+
+        hamper = self.find_food_hamper_by_id(hamper_id)
+        if hamper is None:
+            raise ValueError(f"Food hamper ID {hamper_id} does not exist.")
+
+        if hamper.volunteer_id not in (None, "", 0) and str(hamper.volunteer_id) != str(volunteer_id):
+            raise ValueError(f"Food hamper {hamper_id} has already been claimed by volunteer ID {hamper.volunteer_id}.")
+
+        curr_status = hamper.status[0] if isinstance(hamper.status, list) and hamper.status else (hamper.status or "")
+        if str(curr_status).lower() == "delivered":
+            raise ValueError(f"Cannot claim food hamper {hamper_id} because it has already been delivered.")
+
+        if getattr(hamper, "flagged_issue", None) is not None:
+            raise ValueError(f"Cannot claim food hamper {hamper_id} because it has an unresolved flagged issue.")
+
+        hamper.volunteer_id = volunteer.id
+        if str(curr_status).lower() == "created":
+            self._update_status(hamper, "assigned")
+
+        if not hasattr(volunteer, "work") or not isinstance(volunteer.work, list):
+            volunteer.work = []
+        if hamper.id not in volunteer.work:
+            volunteer.work.append(hamper.id)
+
+        logging.info(f"Volunteer ID {volunteer_id} successfully claimed food hamper ID {hamper_id}")
+        self._save_data()
+        return hamper
+
+    def claim_donation(self, volunteer_id, donation_id):
+        """Allows a volunteer to claim/accept a donation collection job."""
+        volunteer = self.find_volunteer_by_id(volunteer_id)
+        if volunteer is None:
+            raise ValueError(f"Volunteer ID {volunteer_id} does not exist.")
+
+        donation = self.find_donation_by_id(donation_id)
+        if donation is None:
+            raise ValueError(f"Donation ID {donation_id} does not exist.")
+
+        if donation.volunteer_id not in (None, "", 0) and str(donation.volunteer_id) != str(volunteer_id):
+            raise ValueError(f"Donation {donation_id} has already been claimed by volunteer ID {donation.volunteer_id}.")
+
+        curr_status = donation.status[0] if isinstance(donation.status, list) and donation.status else (donation.status or "")
+        if str(curr_status).lower() in ("collected", "stocked"):
+            raise ValueError(f"Cannot claim donation {donation_id} with status '{curr_status}'.")
+
+        if getattr(donation, "flagged_issue", None) is not None:
+            raise ValueError(f"Cannot claim donation {donation_id} because it has an unresolved flagged issue.")
+
+        donation.volunteer_id = volunteer.id
+        self._update_status(donation, "assigned")
+
+        if not hasattr(volunteer, "work") or not isinstance(volunteer.work, list):
+            volunteer.work = []
+        if donation.id not in volunteer.work:
+            volunteer.work.append(donation.id)
+
+        logging.info(f"Volunteer ID {volunteer_id} successfully claimed donation ID {donation_id}")
+        self._save_data()
+        return donation
+
+    def release_hamper(self, volunteer_id, hamper_id):
+        """Allows a volunteer to release / drop a previously claimed food hamper back to the open pool."""
+        volunteer = self.find_volunteer_by_id(volunteer_id)
+        if volunteer is None:
+            raise ValueError(f"Volunteer ID {volunteer_id} does not exist.")
+
+        hamper = self.find_food_hamper_by_id(hamper_id)
+        if hamper is None:
+            raise ValueError(f"Food hamper ID {hamper_id} does not exist.")
+
+        if str(hamper.volunteer_id) != str(volunteer_id):
+            raise ValueError(f"Volunteer ID {volunteer_id} is not assigned to food hamper {hamper_id}.")
+
+        curr_status = hamper.status[0] if isinstance(hamper.status, list) and hamper.status else (hamper.status or "")
+        if str(curr_status).lower() == "delivered":
+            raise ValueError(f"Cannot release food hamper {hamper_id} because it has already been delivered.")
+
+        hamper.volunteer_id = None
+        if str(curr_status).lower() == "assigned":
+            self._update_status(hamper, "created")
+
+        if hasattr(volunteer, "work") and hamper.id in volunteer.work:
+            volunteer.work.remove(hamper.id)
+
+        logging.info(f"Volunteer ID {volunteer_id} released food hamper ID {hamper_id} back to open pool")
+        self._save_data()
+        return hamper
+
+    def release_donation(self, volunteer_id, donation_id):
+        """Allows a volunteer to release / drop a previously claimed donation back to the open pool."""
+        volunteer = self.find_volunteer_by_id(volunteer_id)
+        if volunteer is None:
+            raise ValueError(f"Volunteer ID {volunteer_id} does not exist.")
+
+        donation = self.find_donation_by_id(donation_id)
+        if donation is None:
+            raise ValueError(f"Donation ID {donation_id} does not exist.")
+
+        if str(donation.volunteer_id) != str(volunteer_id):
+            raise ValueError(f"Volunteer ID {volunteer_id} is not assigned to donation {donation_id}.")
+
+        curr_status = donation.status[0] if isinstance(donation.status, list) and donation.status else (donation.status or "")
+        if str(curr_status).lower() in ("collected", "stocked"):
+            raise ValueError(f"Cannot release donation {donation_id} with status '{curr_status}'.")
+
+        donation.volunteer_id = None
+        self._update_status(donation, "created")
+
+        if hasattr(volunteer, "work") and donation.id in volunteer.work:
+            volunteer.work.remove(donation.id)
+
+        logging.info(f"Volunteer ID {volunteer_id} released donation ID {donation_id} back to open pool")
+        self._save_data()
+        return donation
+
     # Issue tracking and resolution (Food Hampers & Donations).
     def flag_hamper_issue(self, hamper_id, issue_description, volunteer_id=None, new_status="flagged"):
         """Flags an issue on a food hamper, saving previous status and updating status to 'flagged'."""
@@ -1072,7 +1407,7 @@ class FoodBank:
 
         curr_status = hamper.status[0] if isinstance(hamper.status, list) and hamper.status else (hamper.status or "created")
         hamper.previous_status = curr_status
-        hamper.status = new_status
+        self._update_status(hamper, new_status)
         issue_record = {
             "entity_type": "hamper",
             "entity_id": hamper.id,
@@ -1103,7 +1438,7 @@ class FoodBank:
 
         curr_status = donation.status[0] if isinstance(donation.status, list) and donation.status else (donation.status or "created")
         donation.previous_status = curr_status
-        donation.status = new_status
+        self._update_status(donation, new_status)
         issue_record = {
             "entity_type": "donation",
             "entity_id": donation.id,
@@ -1139,7 +1474,7 @@ class FoodBank:
             raise ValueError(f"Food hamper ID {hamper_id} does not exist.")
 
         target_status = restore_status or getattr(hamper, "previous_status", None) or "created"
-        hamper.status = target_status
+        self._update_status(hamper, target_status)
         if getattr(hamper, "flagged_issue", None):
             hamper.flagged_issue["status"] = "resolved"
             hamper.flagged_issue["resolved_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1158,7 +1493,7 @@ class FoodBank:
             raise ValueError(f"Donation ID {donation_id} does not exist.")
 
         target_status = restore_status or getattr(donation, "previous_status", None) or "created"
-        donation.status = target_status
+        self._update_status(donation, target_status)
         if getattr(donation, "flagged_issue", None):
             donation.flagged_issue["status"] = "resolved"
             donation.flagged_issue["resolved_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1301,6 +1636,119 @@ class FoodBank:
             return True
         return False
 
+    # FoodBank Organization & Collection Centers
+    def set_foodbank_info(self, address=None, description=None):
+        """Updates the FoodBank organization address and description."""
+        if address is not None:
+            self.address = str(address).strip()
+            self.food_bank_data["address"] = self.address
+        if description is not None:
+            self.description = str(description).strip()
+            self.food_bank_data["description"] = self.description
+        logging.info(f"Updated FoodBank info (Address: '{self.address}')")
+        self._save_data()
+        return {"address": self.address, "description": self.description}
+
+    def get_foodbank_info(self):
+        """Returns the FoodBank organization address, description, and collection centers."""
+        return {
+            "address": self.address,
+            "description": self.description,
+            "collection_centers": self.collection_centers,
+        }
+
+    def add_collection_center(self, name, address):
+        """Adds a new collection center with a name and address."""
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("Collection center name cannot be empty.")
+        center = {
+            "name": name.strip(),
+            "address": str(address or "").strip()
+        }
+        self.collection_centers.append(center)
+        self.food_bank_data["collection_centers"] = self.collection_centers
+        logging.info(f"Added collection center: '{center['name']}' at '{center['address']}'")
+        self._save_data()
+        return center
+
+    def remove_collection_center(self, name):
+        """Removes a collection center matching the given name."""
+        initial_count = len(self.collection_centers)
+        self.collection_centers = [
+            c for c in self.collection_centers
+            if c.get("name", "").strip().lower() != str(name).strip().lower()
+        ]
+        self.food_bank_data["collection_centers"] = self.collection_centers
+        if len(self.collection_centers) < initial_count:
+            logging.info(f"Removed collection center: '{name}'")
+            self._save_data()
+            return True
+        return False
+
+    def update_collection_center(self, identifier, new_name=None, new_address=None):
+        """Updates the name and/or address of an existing collection center or station by name or index."""
+        target_center = None
+        if isinstance(identifier, int) and 0 <= identifier < len(self.collection_centers):
+            target_center = self.collection_centers[identifier]
+        else:
+            name_str = str(identifier).strip().lower()
+            for c in self.collection_centers:
+                if c.get("name", "").strip().lower() == name_str:
+                    target_center = c
+                    break
+
+        if target_center is None:
+            raise ValueError(f"Collection center or station '{identifier}' not found.")
+
+        if new_name is not None and str(new_name).strip():
+            target_center["name"] = str(new_name).strip()
+        if new_address is not None:
+            target_center["address"] = str(new_address).strip()
+
+        self.food_bank_data["collection_centers"] = self.collection_centers
+        logging.info(f"Updated collection center/station '{target_center['name']}' at '{target_center['address']}'")
+        self._save_data()
+        return target_center
+
+    def modify_collection_center(self, identifier, new_name=None, new_address=None):
+        """Alias for update_collection_center."""
+        return self.update_collection_center(identifier, new_name=new_name, new_address=new_address)
+
+    def get_collection_centers(self):
+        """Returns the list of collection centers."""
+        return self.collection_centers
+
+    # Station aliases (collection center / station support)
+    def add_station(self, name, address):
+        """Alias for add_collection_center."""
+        return self.add_collection_center(name, address)
+
+    def update_station(self, identifier, new_name=None, new_address=None):
+        """Alias for update_collection_center."""
+        return self.update_collection_center(identifier, new_name=new_name, new_address=new_address)
+
+    def modify_station(self, identifier, new_name=None, new_address=None):
+        """Alias for update_collection_center."""
+        return self.update_collection_center(identifier, new_name=new_name, new_address=new_address)
+
+    def remove_station(self, name):
+        """Alias for remove_collection_center."""
+        return self.remove_collection_center(name)
+
+    def get_stations(self):
+        """Alias for get_collection_centers."""
+        return self.get_collection_centers()
+
+    @property
+    def stations(self):
+        """Property alias for collection_centers."""
+        return self.collection_centers
+
+    @stations.setter
+    def stations(self, value):
+        self.collection_centers = value
+        self.food_bank_data["collection_centers"] = value
+
     # Inventory proxy management (with auto-persistence).
     def add_inventory_item(self, name, category, quantity=0, unit="pcs", min_quantity=None):
         """Adds a new item or updates an existing item in inventory, with auto-save."""
@@ -1428,7 +1876,7 @@ class FoodBank:
         filepath.parent.mkdir(parents=True, exist_ok=True)
         headers = [
             "Hamper ID", "Description", "Client ID", "Client Name",
-            "Volunteer ID", "Volunteer Name", "Status", "Items", "Flagged Issue"
+            "Volunteer ID", "Volunteer Name", "Status", "Status Updated At", "Items", "Flagged Issue"
         ]
 
         with filepath.open("w", newline="", encoding="utf-8") as f:
@@ -1440,12 +1888,13 @@ class FoodBank:
                 vol = self.find_volunteer_by_id(h.volunteer_id) if h.volunteer_id else None
                 vol_name = vol.name if vol else "Unassigned"
                 status_str = h.status[0] if isinstance(h.status, list) and h.status else (h.status or "created")
+                status_time = h.status_history[-1]["timestamp"] if getattr(h, "status_history", None) else ""
                 items_str = self._format_item_summary(h.items)
                 issue_str = h.flagged_issue.get("issue", "") if getattr(h, "flagged_issue", None) else "None"
 
                 writer.writerow([
                     h.id, h.description, h.client_id or "", client_name,
-                    h.volunteer_id or "", vol_name, status_str, items_str, issue_str
+                    h.volunteer_id or "", vol_name, status_str, status_time, items_str, issue_str
                 ])
 
         logging.info(f"Exported food hampers report to {filepath} ({len(self.food_hampers)} hampers)")
@@ -1462,7 +1911,7 @@ class FoodBank:
         filepath.parent.mkdir(parents=True, exist_ok=True)
         headers = [
             "Donation ID", "Description", "Donor ID", "Donor Name",
-            "Volunteer ID", "Volunteer Name", "Status", "Items", "Flagged Issue"
+            "Volunteer ID", "Volunteer Name", "Status", "Status Updated At", "Items", "Flagged Issue"
         ]
 
         with filepath.open("w", newline="", encoding="utf-8") as f:
@@ -1474,12 +1923,13 @@ class FoodBank:
                 vol = self.find_volunteer_by_id(d.volunteer_id) if d.volunteer_id else None
                 vol_name = vol.name if vol else "Unassigned"
                 status_str = d.status[0] if isinstance(d.status, list) and d.status else (d.status or "created")
+                status_time = d.status_history[-1]["timestamp"] if getattr(d, "status_history", None) else ""
                 items_str = self._format_item_summary(d.items)
                 issue_str = d.flagged_issue.get("issue", "") if getattr(d, "flagged_issue", None) else "None"
 
                 writer.writerow([
                     d.id, d.description, d.donor_id or "", donor_name,
-                    d.volunteer_id or "", vol_name, status_str, items_str, issue_str
+                    d.volunteer_id or "", vol_name, status_str, status_time, items_str, issue_str
                 ])
 
         logging.info(f"Exported donations report to {filepath} ({len(self.donations)} donations)")

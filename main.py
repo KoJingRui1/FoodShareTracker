@@ -1,7 +1,6 @@
-from src.gui.main_dashboard import launch
-# TODO: Import the new admin utilities.
+#Import the new admin utilities.
 from src.app.utils import init_logger, backup_data
-
+from launch import launch
 if __name__ == "__main__":
     # Initialize the logger as the very first step.
     init_logger()

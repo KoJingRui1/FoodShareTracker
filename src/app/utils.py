@@ -10,7 +10,7 @@ try:
 except ImportError:
     bcrypt = None
 
-def init_logger(log_file="foodshare.log"):
+def init_logger(log_file="src/data/foodshare.log"):
     """Configures the root logger to write to a file."""
     # Ensure folder exists if log_file is inside a subfolder
     log_dir = os.path.dirname(log_file)

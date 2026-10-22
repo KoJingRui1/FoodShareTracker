@@ -3,6 +3,7 @@ try:
 except ModuleNotFoundError:
     from app.user import User
 
+
 class Donation:
     def __init__(self, id, donor_id, description="", status="created", volunteer_id=None):
         self.id = id
@@ -14,3 +15,4 @@ class Donation:
         self.flagged_issue = None
         self.previous_status = None
         self.issue_history = []
+        self.status_history = []
