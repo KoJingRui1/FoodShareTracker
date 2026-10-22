@@ -2345,6 +2345,3 @@ def show_admin_page(manager, user):
             "Inventory"
         )
 
-
-# Functional alias
-admin_page = show_admin_page

@@ -11,6 +11,8 @@ from src.app.FoodBank import FoodBankManager
 from src.gui.new_system_page import show_new_system_page
 from src.gui.main_page import show_main_page
 from src.gui.admin_page import show_admin_page
+from src.gui.staff_page import show_staff_page
+from src.gui.donor_page import show_donor_page
 
 
 def launch():
@@ -53,6 +55,22 @@ def launch():
             st.rerun()
         else:
             show_admin_page(manager, user)
+    elif st.session_state.current_page == "staff":
+        user = st.session_state.get("user")
+        if user is None:
+            # If not logged in, redirect to main/login page
+            st.session_state.current_page = "main"
+            st.rerun()
+        else:
+            show_staff_page(manager, user)
+    elif st.session_state.current_page == "donor":
+        user = st.session_state.get("user")
+        if user is None:
+            # If not logged in, redirect to main/login page
+            st.session_state.current_page = "main"
+            st.rerun()
+        else:
+            show_donor_page(manager, user)
     else:
         st.session_state.current_page = "main"
         show_main_page(manager)

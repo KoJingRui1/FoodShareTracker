@@ -1,8 +1,8 @@
 import os
 import zipfile
-import datetime
 import streamlit as st
 import pandas as pd
+import datetime
 from src.app.admin import AdminUser
 from src.app.staff import StaffUser
 from src.app.volunteer import VolunteerUser
@@ -30,7 +30,7 @@ def success_page(title, message, detail, return_page):
 
 
 # =========================================================
-# Staff Page
+# Admin Page
 # =========================================================
 
 def show_staff_page(manager, user):
@@ -55,10 +55,20 @@ def show_staff_page(manager, user):
     st.sidebar.caption("Staff Member")
     st.sidebar.divider()
 
+    # Check if system info is incomplete: address, description, or at least one station
+    is_system_incomplete = (
+        not getattr(manager, "address", "").strip()
+        or not getattr(manager, "description", "").strip()
+        or not manager.get_stations()
+    )
+
     if "staff_page" not in st.session_state:
-        st.session_state.staff_page = "Profile"
+        st.session_state.staff_page = "System" if is_system_incomplete else "Profile"
 
     # Navigation buttons
+    if st.sidebar.button("System", width="stretch"):
+        st.session_state.staff_page = "System"
+
     if st.sidebar.button("Profile", width="stretch"):
         st.session_state.staff_page = "Profile"
 
@@ -80,9 +90,6 @@ def show_staff_page(manager, user):
     if st.sidebar.button("Reports", width="stretch"):
         st.session_state.staff_page = "Reports"
 
-    if st.sidebar.button("System", width="stretch"):
-        st.session_state.staff_page = "System"
-
     st.sidebar.divider()
     if st.sidebar.button("Logout", width="stretch"):
         st.session_state.user = None
@@ -92,10 +99,219 @@ def show_staff_page(manager, user):
     page = st.session_state.staff_page
 
     # =========================================================
-    # Staff Profile
+    # System Profile & Configuration
     # =========================================================
 
-    if page == "Profile":
+    if page == "System":
+        st.title("System Profile & Information")
+
+        current_address = getattr(manager, "address", "") or ""
+        current_description = getattr(manager, "description", "") or ""
+        stations = manager.get_stations()
+
+        # Alert if organization profile is incomplete
+        missing_fields = []
+        if not current_address.strip():
+            missing_fields.append("Organization Address")
+        if not current_description.strip():
+            missing_fields.append("Organization Description")
+        if not stations:
+            missing_fields.append("At least one Collection Center / Station")
+
+        if missing_fields:
+            st.warning(f"⚠️ System configuration incomplete! Please fill in: **{', '.join(missing_fields)}**.")
+
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            st.subheader("FoodBank Address")
+            st.info(current_address if current_address.strip() else "*(Not set - Please update)*")
+
+        with col2:
+            st.subheader("FoodBank Description")
+            st.info(current_description if current_description.strip() else "*(Not set - Please update)*")
+
+        col_up_info, _ = st.columns([1, 3])
+        with col_up_info:
+            if st.button("Update System Info", width="stretch"):
+                st.session_state.staff_page = "Update System Info"
+                st.rerun()
+
+        st.divider()
+        st.subheader("Collection Centers / Stations")
+
+        stations_data = []
+        for station in stations:
+            stations_data.append({
+                "ID": station.get("id"),
+                "Station Name": station.get("name", ""),
+                "Station Address": station.get("address", ""),
+                "Select": False
+            })
+
+        if not stations_data:
+            st.info("No collection centers/stations registered yet.")
+        else:
+            station_df = pd.DataFrame(stations_data)
+            edited_stations = st.data_editor(
+                station_df,
+                column_config={
+                    "ID": st.column_config.NumberColumn("ID", width="small", disabled=True),
+                    "Station Name": st.column_config.TextColumn("Station Name", width="medium", disabled=True),
+                    "Station Address": st.column_config.TextColumn("Station Address", width="large", disabled=True),
+                    "Select": st.column_config.CheckboxColumn("Select", width="small")
+                },
+                hide_index=True,
+                width="stretch",
+                key="system_stations_table"
+            )
+
+            btn_update_st, btn_del_st = st.columns(2)
+            with btn_update_st:
+                if st.button("Edit Station", width="stretch"):
+                    selected_rows = edited_stations[edited_stations["Select"] == True]
+                    if len(selected_rows) == 0:
+                        st.error("Please select a station.")
+                    elif len(selected_rows) > 1:
+                        st.error("Please select only one station.")
+                    else:
+                        st.session_state.selected_station_id = int(selected_rows.iloc[0]["ID"])
+                        st.session_state.staff_page = "Edit Station"
+                        st.rerun()
+
+            with btn_del_st:
+                if st.button("Delete Station", width="stretch"):
+                    selected_rows = edited_stations[edited_stations["Select"] == True]
+                    if len(selected_rows) == 0:
+                        st.error("Please select a station.")
+                    elif len(selected_rows) > 1:
+                        st.error("Please select only one station.")
+                    else:
+                        station_id = int(selected_rows.iloc[0]["ID"])
+                        active_donations = manager.get_active_donations_for_station(station_id)
+                        if active_donations:
+                            don_ids_str = ", ".join([f"#{d.id}" for d in active_donations])
+                            st.error(
+                                f"Cannot delete Station #{station_id}: It is currently assigned to active donation(s): {don_ids_str}. "
+                                "Please reassign or complete these donations before deleting the station."
+                            )
+                        else:
+                            manager.remove_station(station_id)
+                            st.success(f"Station ID #{station_id} deleted successfully.")
+                            st.rerun()
+
+        st.write("")
+        if st.button("Add Station", width="stretch"):
+            st.session_state.staff_page = "Add Station"
+            st.rerun()
+
+    # =========================================================
+    # Update System Information (Address & Description)
+    # =========================================================
+
+    elif page == "Update System Info":
+        st.title("Update System Information")
+
+        current_address = getattr(manager, "address", "") or ""
+        current_description = getattr(manager, "description", "") or ""
+
+        new_address = st.text_input("Organization Address", value=current_address)
+        new_description = st.text_area("Organization Description", value=current_description)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Save System Info", width="stretch"):
+                if not new_address.strip() or not new_description.strip():
+                    st.error("Both address and description are required. Please fill them in.")
+                else:
+                    manager.set_foodbank_info(address=new_address.strip(), description=new_description.strip())
+                    st.session_state.staff_page = "System"
+                    st.rerun()
+
+        with col2:
+            if st.button("Cancel", width="stretch"):
+                st.session_state.staff_page = "System"
+                st.rerun()
+
+    # =========================================================
+    # Add Station
+    # =========================================================
+
+    elif page == "Add Station":
+        st.title("Add Collection Center / Station")
+
+        station_name = st.text_input("Station Name")
+        station_address = st.text_input("Station Address")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Save Station", width="stretch"):
+                if not station_name.strip() or not station_address.strip():
+                    st.error("Please fill in both the station name and address.")
+                else:
+                    try:
+                        manager.add_station(station_name.strip(), station_address.strip())
+                        st.session_state.staff_page = "System"
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to add station: {e}")
+
+        with col2:
+            if st.button("Cancel", width="stretch"):
+                st.session_state.staff_page = "System"
+                st.rerun()
+
+    # =========================================================
+    # Edit Station
+    # =========================================================
+
+    elif page == "Edit Station":
+        st.title("Edit Collection Center / Station")
+
+        if "selected_station_id" not in st.session_state:
+            st.error("No station selected.")
+            if st.button("Back to System"):
+                st.session_state.staff_page = "System"
+                st.rerun()
+        else:
+            station_id = st.session_state.selected_station_id
+            target_station = manager.find_station_by_id(station_id)
+            if target_station is None:
+                st.error("Station not found.")
+                if st.button("Back to System"):
+                    del st.session_state.selected_station_id
+                    st.session_state.staff_page = "System"
+                    st.rerun()
+            else:
+                st.subheader(f"Editing Station ID #{target_station.get('id')}: {target_station.get('name')}")
+
+                new_name = st.text_input("Station Name", value=target_station.get("name", ""))
+                new_address = st.text_input("Station Address", value=target_station.get("address", ""))
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("Save Station Changes", width="stretch"):
+                        if not new_name.strip() or not new_address.strip():
+                            st.error("Both station name and address are required.")
+                        else:
+                            try:
+                                manager.update_station(station_id, new_name=new_name.strip(), new_address=new_address.strip())
+                                del st.session_state.selected_station_id
+                                st.session_state.staff_page = "System"
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Failed to update station: {e}")
+
+                with col2:
+                    if st.button("Cancel", width="stretch"):
+                        del st.session_state.selected_station_id
+                        st.session_state.staff_page = "System"
+                        st.rerun()
+
+    # =========================================================
+    # Admin Profile
+    # =========================================================
+
+    elif page == "Profile":
         st.title("Staff Profile")
 
         col_img, col_info = st.columns([1, 3])
@@ -113,8 +329,10 @@ def show_staff_page(manager, user):
             st.session_state.staff_page = "Update Profile"
             st.rerun()
 
+
+
     # =========================================================
-    # Update Current Staff Profile
+    # Update Current Admin Profile
     # =========================================================
 
     elif page == "Update Profile":
@@ -192,7 +410,6 @@ def show_staff_page(manager, user):
                         file_ext = uploaded_file.name.split(".")[-1]
                         save_filename = f"user_{user.id}_{int(datetime.datetime.now().timestamp())}.{file_ext}"
                         save_path = os.path.join(assets_dir, save_filename).replace("\\", "/")
-
                         with open(save_path, "wb") as f:
                             f.write(uploaded_file.getbuffer())
 
@@ -217,104 +434,209 @@ def show_staff_page(manager, user):
         )
 
     # =========================================================
-    # Users Directory (View Only - No Edit User / Delete User)
+    # Users
     # =========================================================
 
     elif page == "Users":
-        st.title("Users Directory")
-        st.caption("Browse registered user accounts across system roles.")
-
+        st.title("Users")
         user_list = st.selectbox(
-            "Select User Role Directory",
-            ["Staffs", "Volunteers", "Donors", "Clients", "Admins"]
+            "Show users list",
+            ["", "Admins", "Staffs", "Volunteers", "Donors", "Clients"]
         )
 
-        left, right = st.columns([1, 6])
-        with left:
-            term = st.selectbox(
-                "Search By",
-                ["-", "ID", "NAME", "EMAIL"]
-            )
-        with right:
-            if term == "ID":
-                search_term = st.number_input("Please enter the user ID.", min_value=1, step=1)
-            elif term == "NAME":
-                search_term = st.text_input("Please enter the user name.")
-            elif term == "EMAIL":
-                search_term = st.text_input("Please enter the user email.")
+        collection_map = {
+            "Admins": (manager.admins, "Admins"),
+            "Staffs": (manager.staffs, "Staffs"),
+            "Volunteers": (manager.volunteers, "Volunteers"),
+            "Donors": (manager.donors, "Donors"),
+            "Clients": (manager.clients, "Clients"),
+        }
+
+        if user_list in collection_map:
+            users_in_category, cat_label = collection_map[user_list]
+
+            search_terms = ["-", "ID", "NAME", "EMAIL"]
+            if user_list == "Clients":
+                search_terms.append("ADDRESS")
+
+            left, right = st.columns([1, 6])
+            with left:
+                term = st.selectbox(
+                    "Term",
+                    search_terms,
+                    key=f"{user_list}_term"
+                )
+
+            with right:
+                if term == "ID":
+                    search_term = st.number_input(
+                        "Please enter the ID.",
+                        min_value=0,
+                        step=1,
+                        key=f"{user_list}_id_search"
+                    )
+                elif term == "NAME":
+                    search_term = st.text_input(
+                        "Please enter the name.",
+                        key=f"{user_list}_name_search"
+                    )
+                elif term == "EMAIL":
+                    search_term = st.text_input(
+                        "Please enter the email.",
+                        key=f"{user_list}_email_search"
+                    )
+                elif term == "ADDRESS":
+                    search_term = st.text_input(
+                        "Please enter address keyword.",
+                        key=f"{user_list}_addr_search"
+                    )
+                else:
+                    search_term = ""
+
+            table_data = []
+            for u in users_in_category:
+                matched = False
+                if term == "-":
+                    matched = True
+                elif term == "ID":
+                    matched = (u.id == search_term)
+                elif term == "NAME":
+                    matched = (str(search_term).lower() in u.name.lower())
+                elif term == "EMAIL":
+                    matched = (str(search_term).lower() in u.email.lower())
+                elif term == "ADDRESS":
+                    addr_val = getattr(u, "address", "") or ""
+                    matched = (str(search_term).lower() in addr_val.lower())
+
+                if matched:
+                    row = {
+                        "ID": u.id,
+                        "Name": u.name,
+                        "Email": u.email
+                    }
+                    if isinstance(u, ClientUser):
+                        row["Address"] = getattr(u, "address", "") or ""
+                        allergies_val = getattr(u, "allergy", [])
+                        row["Allergies"] = ", ".join(allergies_val) if isinstance(allergies_val, list) and allergies_val else "None"
+                    elif isinstance(u, VolunteerUser):
+                        row["Status"] = getattr(u, "status", "Available")
+                    row["Select"] = False
+                    table_data.append(row)
+
+            if len(table_data) == 0:
+                st.info(f"No {user_list} found.")
             else:
-                search_term = ""
-
-        if user_list == "Admins":
-            users = manager.admins
-        elif user_list == "Staffs":
-            users = manager.staffs
-        elif user_list == "Volunteers":
-            users = manager.volunteers
-        elif user_list == "Donors":
-            users = manager.donors
-        elif user_list == "Clients":
-            users = manager.clients
-        else:
-            users = []
-
-        table_data = []
-        for u in users:
-            if term == "-":
-                matched = True
-            elif term == "ID":
-                matched = (u.id == search_term)
-            elif term == "NAME":
-                matched = (search_term.lower() in u.name.lower())
-            elif term == "EMAIL":
-                matched = (search_term.lower() in u.email.lower())
-            else:
-                matched = True
-
-            if matched:
-                row = {
-                    "ID": u.id,
-                    "Name": u.name,
-                    "Email": u.email,
-                    "Role": type(u).__name__.replace("User", "")
+                user_df = pd.DataFrame(table_data)
+                cols = [c for c in user_df.columns if c != "Select"] + ["Select"]
+                user_df = user_df[cols]
+                col_configs = {
+                    "ID": st.column_config.NumberColumn("ID", width="small", disabled=True),
+                    "Name": st.column_config.TextColumn("Name", width="medium", disabled=True),
+                    "Email": st.column_config.TextColumn("Email", width="medium", disabled=True),
                 }
-                if user_list == "Clients":
-                    row["Address"] = getattr(u, "address", "") or "N/A"
-                    allergies = getattr(u, "allergy", [])
-                    if isinstance(allergies, list):
-                        row["Allergies"] = ", ".join(allergies) if allergies else "None"
-                    else:
-                        row["Allergies"] = str(allergies) if allergies else "None"
+                if "Address" in user_df.columns:
+                    col_configs["Address"] = st.column_config.TextColumn("Address", width="medium", disabled=True)
+                if "Allergies" in user_df.columns:
+                    col_configs["Allergies"] = st.column_config.TextColumn("Allergies", width="medium", disabled=True)
+                if "Status" in user_df.columns:
+                    col_configs["Status"] = st.column_config.TextColumn("Status", width="small", disabled=True)
+                col_configs["Select"] = st.column_config.CheckboxColumn("Select", width="small")
 
-                row["Select"] = False
-                table_data.append(row)
+                edited_data = st.data_editor(
+                    user_df,
+                    column_config=col_configs,
+                    hide_index=True,
+                    width="stretch",
+                    key=f"{user_list}_table"
+                )
 
-        if not table_data:
-            st.info(f"No {user_list} found matching search criteria.")
-        else:
-            user_df = pd.DataFrame(table_data)
-            cols = [c for c in user_df.columns if c != "Select"] + ["Select"]
-            user_df = user_df[cols]
+                st.caption("Staff can view all registered user records across account types.")
+        st.divider()
+        if st.button("Add Account"):
+            st.session_state.staff_page = "Add Account"
+            st.rerun()
 
-            col_configs = {
-                "ID": st.column_config.NumberColumn("ID", width="small", disabled=True),
-                "Name": st.column_config.TextColumn("Name", width="medium", disabled=True),
-                "Email": st.column_config.TextColumn("Email", width="medium", disabled=True),
-                "Role": st.column_config.TextColumn("Role", width="small", disabled=True),
-            }
-            if "Address" in user_df.columns:
-                col_configs["Address"] = st.column_config.TextColumn("Address", width="medium", disabled=True)
-            if "Allergies" in user_df.columns:
-                col_configs["Allergies"] = st.column_config.TextColumn("Allergies", width="medium", disabled=True)
-            col_configs["Select"] = st.column_config.CheckboxColumn("Select", width="small")
+        # CSV Export for Volunteers
+        if user_list == "Volunteers":
+            st.write("")
+            if st.button("Export Volunteers CSV Report", width="stretch"):
+                try:
+                    filepath = manager.export_volunteers_csv()
+                    st.success(f"Volunteers report exported to '{filepath}'.")
+                    with open(filepath, "rb") as f:
+                        st.download_button(
+                            label="Download Volunteers CSV",
+                            data=f.read(),
+                            file_name=os.path.basename(filepath),
+                            mime="text/csv"
+                        )
+                except Exception as e:
+                    st.error(f"Failed to export volunteers report: {e}")
 
-            st.data_editor(
-                user_df,
-                column_config=col_configs,
-                hide_index=True,
-                width="stretch",
-                key="staff_users_table"
-            )
+    # =========================================================
+    # Delete Selected User
+    # =========================================================
+
+    elif page == "Add Account":
+        st.title("Add Account")
+
+        account_type = st.selectbox(
+            "Account Type",
+            ["Admin", "Staff", "Volunteer", "Donor", "Client"]
+        )
+
+        name = st.text_input("Please enter the name.")
+        email = st.text_input("Please enter the email.", type="email")
+        password = st.text_input("Please enter the password.", type="password")
+        confirm_password = st.text_input("Please confirm the password.", type="password")
+
+        description = ""
+        address = ""
+        allergy_input = ""
+        if account_type == "Client":
+            address = st.text_input("Please enter the address.")
+            description = st.text_area("Please enter the personal description / background.")
+            allergy_input = st.text_input("Please enter allergies (comma-separated, optional, e.g. Peanuts, Seafood)")
+
+        if st.button("Add Account"):
+            if not name or not email or not password:
+                st.error("Please enter the name, email, and password.")
+            elif not manager.valid_name(name):
+                st.error("Invalid name.")
+            elif not manager.valid_password(password):
+                st.error("Invalid password. Password must be at least 6 characters and include letters and numbers.")
+            elif password != confirm_password:
+                st.error("The password is not the same as the confirmation.")
+            elif "@" not in email or "." not in email.split("@")[-1]:
+                st.error("Please enter a valid email address.")
+            elif manager.find_user_by_email(email.strip()) is not None:
+                st.error(f"Email '{email.strip()}' is already registered.")
+            else:
+                clean_email = email.strip()
+                if account_type == "Admin":
+                    manager.add_admin(name.strip(), password, clean_email)
+                elif account_type == "Staff":
+                    manager.add_staff(name.strip(), password, clean_email)
+                elif account_type == "Volunteer":
+                    manager.add_volunteer(name.strip(), password, clean_email)
+                elif account_type == "Donor":
+                    manager.add_donor(name.strip(), password, clean_email)
+                elif account_type == "Client":
+                    new_cl = manager.add_client(name.strip(), password, clean_email, description=description.strip(), address=address.strip())
+                    if allergy_input.strip():
+                        parsed_allg = [a.strip() for a in allergy_input.split(",") if a.strip()]
+                        manager.update_user(new_cl.id, allergy=parsed_allg)
+
+                st.session_state.staff_page = "Add Account Success"
+                st.rerun()
+
+    elif page == "Add Account Success":
+        success_page(
+            "Account Added",
+            "The account has been added successfully!",
+            "The new account has been saved.",
+            "Users"
+        )
 
     # =========================================================
     # Applications (Volunteer Applications)
@@ -323,31 +645,34 @@ def show_staff_page(manager, user):
     elif page == "Applications":
         st.title("Volunteer Applications")
 
-        all_apps = manager.get_volunteer_applications()
+        applications = getattr(manager, "applications", [])
 
         left, right = st.columns([1, 6])
         with left:
             term = st.selectbox(
-                "Search By",
+                "Term",
                 ["-", "ID", "NAME", "EMAIL", "STATUS"],
-                key="app_term"
+                key="application_term"
             )
+
         with right:
             if term == "ID":
-                search_term = st.number_input("Please enter the Application ID.", min_value=1, step=1)
+                search_term = st.number_input("Please enter the ID.", min_value=1, step=1, key="application_id_search")
             elif term == "NAME":
-                search_term = st.text_input("Please enter Applicant Name.")
+                search_term = st.text_input("Please enter the name.", key="application_name_search")
             elif term == "EMAIL":
-                search_term = st.text_input("Please enter Applicant Email.")
+                search_term = st.text_input("Please enter the email.", key="application_email_search")
             elif term == "STATUS":
-                search_term = st.selectbox("Please choose the status.", ["pending", "approved", "rejected"])
+                search_term = st.selectbox("Please choose the status.", ["pending", "approved", "rejected"], key="application_status_search")
             else:
                 search_term = ""
 
         filtered_apps = []
-        for app in all_apps:
-            matched = True
-            if term == "ID":
+        for app in applications:
+            matched = False
+            if term == "-":
+                matched = True
+            elif term == "ID":
                 matched = (app.get("id") == search_term)
             elif term == "NAME":
                 matched = (str(search_term).lower() in app.get("name", "").lower())
@@ -382,7 +707,7 @@ def show_staff_page(manager, user):
                 },
                 hide_index=True,
                 width="stretch",
-                key="staff_application_table"
+                key="application_table"
             )
 
             left_button, right_button = st.columns(2)
@@ -432,22 +757,22 @@ def show_staff_page(manager, user):
         with left:
             term = st.selectbox(
                 "Term",
-                ["-", "ID", "DONOR NAME", "STATION", "VOLUNTEER NAME", "STATUS"],
-                key="staff_donation_term"
+                ["-", "ID", "DONOR NAME", "VOLUNTEER NAME", "STATION", "STATUS"],
+                key="donation_term"
             )
         with right:
             if term == "ID":
-                search_term = st.number_input("Please enter the Donation ID.", min_value=1, step=1, key="staff_don_id_search")
+                search_term = st.number_input("Please enter the ID.", min_value=1, step=1, key="donation_id_search")
             elif term == "DONOR NAME":
-                search_term = st.text_input("Please enter Donor Name.", key="staff_don_donor_search")
+                search_term = st.text_input("Please enter Donor Name.", key="donation_donor_search")
             elif term == "VOLUNTEER NAME":
-                search_term = st.text_input("Please enter Volunteer Name.", key="staff_don_vol_search")
+                search_term = st.text_input("Please enter Volunteer Name.", key="donation_vol_search")
             elif term == "STATION":
                 all_stations = manager.get_stations()
                 station_filter_opts = ["All"] + [f"ID: {s.get('id')} - {s.get('name')}" for s in all_stations]
-                search_term = st.selectbox("Select Station", station_filter_opts, key="staff_don_station_search")
+                search_term = st.selectbox("Select Station", station_filter_opts, key="donation_station_search")
             elif term == "STATUS":
-                search_term = st.selectbox("Please choose the status.", ["created", "assigned", "collected", "stocked"], key="staff_don_status_search")
+                search_term = st.selectbox("Please choose the status.", ["created", "assigned", "collected", "stocked"], key="donation_status_search")
             else:
                 search_term = ""
 
@@ -459,21 +784,33 @@ def show_staff_page(manager, user):
             vol_obj = manager.find_volunteer_by_id(d.volunteer_id) if d.volunteer_id else None
             vol_name = vol_obj.name if vol_obj else (f"ID: {d.volunteer_id}" if d.volunteer_id else "Unassigned")
 
-            matched = True
-            if term == "ID":
+            st_val = getattr(d, "station", None)
+            if st_val is not None:
+                st_obj = manager.find_station_by_id(st_val)
+                station_display = f"ID: {st_val} - {st_obj['name']}" if st_obj else f"Station ID: {st_val}"
+            else:
+                station_display = "Unassigned"
+
+            matched = False
+            if term == "-":
+                matched = True
+            elif term == "ID":
                 matched = (d.id == search_term)
             elif term == "DONOR NAME":
                 matched = (str(search_term).lower() in donor_name.lower())
             elif term == "VOLUNTEER NAME":
                 matched = (str(search_term).lower() in vol_name.lower())
             elif term == "STATION":
-                if search_term != "All":
-                    selected_sid = search_term.split(" - ")[0].replace("ID: ", "").strip()
-                    matched = (str(getattr(d, "station", "")) == str(selected_sid))
+                if search_term == "All":
+                    matched = True
+                else:
+                    sel_id = search_term.split(" - ")[0].replace("ID: ", "").strip()
+                    matched = (str(st_val) == sel_id)
             elif term == "STATUS":
                 matched = (str(status_val).lower() == str(search_term).lower())
 
             if matched:
+
                 st_val = getattr(d, "station", None)
                 if st_val is not None:
                     st_obj = manager.find_station_by_id(st_val)
@@ -508,7 +845,7 @@ def show_staff_page(manager, user):
                 },
                 hide_index=True,
                 width="stretch",
-                key="staff_donation_table"
+                key="donation_table"
             )
 
             col1, col2 = st.columns(2)
@@ -556,11 +893,10 @@ def show_staff_page(manager, user):
                             label="Download Donations CSV",
                             data=f.read(),
                             file_name=os.path.basename(filepath),
-                            mime="text/csv",
-                            width="stretch"
+                            mime="text/csv"
                         )
                 except Exception as e:
-                    st.error(f"Failed to export donations: {e}")
+                    st.error(f"Failed to export donations report: {e}")
 
     # =========================================================
     # Create Donation
@@ -569,14 +905,17 @@ def show_staff_page(manager, user):
     elif page == "Create Donation":
         st.title("Create Donation")
 
-        donors = manager.donors
-        if not donors:
-            st.warning("No donors found in the system. Please register a donor first.")
+        if not manager.donors:
+            st.warning("No donors available. Please create a Donor account first in Users.")
+            if st.button("Back to Donations"):
+                st.session_state.staff_page = "Donations"
+                st.rerun()
         else:
-            donor_options = {f"ID: {d.id} - {d.name}": d.id for d in donors}
+            donor_options = {f"ID: {d.id} - {d.name}": d.id for d in manager.donors}
             selected_donor_label = st.selectbox("Select Donor", list(donor_options.keys()))
             donor_id = donor_options[selected_donor_label]
 
+            # Station / Collection Center selector
             stations = manager.get_stations()
             station_options = {"Unassigned": None}
             for s in stations:
@@ -593,7 +932,7 @@ def show_staff_page(manager, user):
             items_list = []
             if chosen_items:
                 for it_name in chosen_items:
-                    qty = st.number_input(f"Quantity for {it_name}", min_value=1.0, step=1.0, value=1.0, key=f"staff_don_item_{it_name}")
+                    qty = st.number_input(f"Quantity for {it_name}", min_value=1.0, step=1.0, value=1.0, key=f"don_item_{it_name}")
                     items_list.append({"name": it_name, "quantity": qty})
 
             vol_options = {"Unassigned": None}
@@ -637,7 +976,7 @@ def show_staff_page(manager, user):
         )
 
     # =========================================================
-    # Donation Detail (With Confirmation of Collected & Stock)
+    # Donation Detail
     # =========================================================
 
     elif page == "Donation Detail":
@@ -718,21 +1057,21 @@ def show_staff_page(manager, user):
 
                 st.divider()
 
-                # Staff Collection & Stocking Operations (Staff can confirm collected & stock into inventory)
+                # Staff Collection & Stock Confirmation
                 if curr_status.lower() in ("created", "assigned"):
-                    st.subheader("Staff Operations")
-                    st.info("Confirm reception of this donation once received at the station or food bank.")
+                    st.subheader("Collection Confirmation")
+                    st.info("Confirm that the donated items have been received or collected.")
                     col_d1, col_d2 = st.columns(2)
                     with col_d1:
-                        if st.button("Mark as Collected", width="stretch"):
+                        if st.button("Confirm Collected", width="stretch"):
                             try:
                                 manager.collect_donation(target_donation.id, target_donation.volunteer_id)
-                                st.success(f"Donation #{target_donation.id} has been marked as collected!")
+                                st.success(f"Donation #{target_donation.id} confirmed as collected!")
                                 st.rerun()
                             except Exception as e:
-                                st.error(f"Cannot mark donation as collected: {e}")
+                                st.error(f"Cannot confirm donation collection: {e}")
                     with col_d2:
-                        if st.button("Collect & Stock into Inventory", width="stretch"):
+                        if st.button("Confirm Collected & Stock into Inventory", width="stretch"):
                             try:
                                 manager.collect_donation(target_donation.id, target_donation.volunteer_id)
                                 manager.stock_donation(target_donation.id)
@@ -742,7 +1081,7 @@ def show_staff_page(manager, user):
                                 st.error(f"Cannot collect and stock donation: {e}")
 
                 elif curr_status.lower() == "collected":
-                    st.subheader("Staff Operations")
+                    st.subheader("Stock Items into Inventory")
                     st.info("Donation is collected. You can transfer donated items into inventory.")
                     if st.button("Stock Items into Inventory Now", width="stretch"):
                         try:
@@ -770,6 +1109,7 @@ def show_staff_page(manager, user):
     # =========================================================
     # Edit / Reassign Donation
     # =========================================================
+
 
     elif page == "Edit Donation":
         st.title("Edit / Reassign Donation")
@@ -842,7 +1182,7 @@ def show_staff_page(manager, user):
                         curr_vol_label = lbl
                         break
                 selected_vol_label = st.selectbox(
-                    "Assigned Volunteer (Reassign / Delegate)",
+                    "Assigned Volunteer (Force Reassign / Delegate)",
                     list(volunteer_options.keys()),
                     index=list(volunteer_options.keys()).index(curr_vol_label)
                 )
@@ -857,6 +1197,7 @@ def show_staff_page(manager, user):
                     st.subheader("Modify Donation Items (Created Status Only)")
                     available_items = [item.name for item in manager.get_inventory_items()]
                     existing_item_names = [it.get("name") for it in target_donation.items if isinstance(it, dict) and it.get("name")]
+                    # Ensure existing items are selectable
                     for en in existing_item_names:
                         if en not in available_items:
                             available_items.append(en)
@@ -864,12 +1205,13 @@ def show_staff_page(manager, user):
                     selected_edit_items = st.multiselect("Donated Items", available_items, default=existing_item_names)
                     new_items_list = []
                     for it_name in selected_edit_items:
+                        # find previous qty if available
                         prev_qty = 1.0
                         for it in target_donation.items:
                             if isinstance(it, dict) and it.get("name") == it_name:
                                 prev_qty = float(it.get("quantity", 1.0))
                                 break
-                        qty = st.number_input(f"Quantity for {it_name}", min_value=1.0, step=1.0, value=prev_qty, key=f"staff_edit_don_item_{it_name}")
+                        qty = st.number_input(f"Quantity for {it_name}", min_value=1.0, step=1.0, value=prev_qty, key=f"edit_don_item_{it_name}")
                         new_items_list.append({"name": it_name, "quantity": qty})
                 else:
                     st.info(f"Items cannot be modified because this donation has already reached '{curr_status}' status.")
@@ -920,17 +1262,17 @@ def show_staff_page(manager, user):
             term = st.selectbox(
                 "Term",
                 ["-", "ID", "CLIENT NAME", "VOLUNTEER NAME", "STATUS"],
-                key="staff_hamper_term"
+                key="hamper_term"
             )
         with right:
             if term == "ID":
-                search_term = st.number_input("Please enter the Hamper ID.", min_value=1, step=1, key="staff_hamper_id_search")
+                search_term = st.number_input("Please enter the ID.", min_value=1, step=1, key="hamper_id_search")
             elif term == "CLIENT NAME":
-                search_term = st.text_input("Please enter Client Name.", key="staff_hamper_client_search")
+                search_term = st.text_input("Please enter Client Name.", key="hamper_client_search")
             elif term == "VOLUNTEER NAME":
-                search_term = st.text_input("Please enter Volunteer Name.", key="staff_hamper_vol_search")
+                search_term = st.text_input("Please enter Volunteer Name.", key="hamper_vol_search")
             elif term == "STATUS":
-                search_term = st.selectbox("Please choose the status.", ["created", "assigned", "packed", "delivered"], key="staff_hamper_status_search")
+                search_term = st.selectbox("Please choose the status.", ["created", "assigned", "packed", "delivered"], key="hamper_status_search")
             else:
                 search_term = ""
 
@@ -942,8 +1284,10 @@ def show_staff_page(manager, user):
             vol_obj = manager.find_volunteer_by_id(h.volunteer_id) if h.volunteer_id else None
             vol_name = vol_obj.name if vol_obj else (f"ID: {h.volunteer_id}" if h.volunteer_id else "Unassigned")
 
-            matched = True
-            if term == "ID":
+            matched = False
+            if term == "-":
+                matched = True
+            elif term == "ID":
                 matched = (h.id == search_term)
             elif term == "CLIENT NAME":
                 matched = (str(search_term).lower() in client_name.lower())
@@ -953,6 +1297,7 @@ def show_staff_page(manager, user):
                 matched = (str(status_val).lower() == str(search_term).lower())
 
             if matched:
+
                 hamper_table.append({
                     "ID": h.id,
                     "Client": client_name,
@@ -978,7 +1323,7 @@ def show_staff_page(manager, user):
                 },
                 hide_index=True,
                 width="stretch",
-                key="staff_hamper_table"
+                key="hamper_table"
             )
 
             col1, col2 = st.columns(2)
@@ -1026,8 +1371,7 @@ def show_staff_page(manager, user):
                             label="Download Food Hampers CSV",
                             data=f.read(),
                             file_name=os.path.basename(filepath),
-                            mime="text/csv",
-                            width="stretch"
+                            mime="text/csv"
                         )
                 except Exception as e:
                     st.error(f"Failed to export food hampers report: {e}")
@@ -1052,6 +1396,7 @@ def show_staff_page(manager, user):
                 st.markdown("---")
                 st.subheader(f"Recipient Profile: {chosen_client.name}")
 
+                # Prominently show allergies
                 client_allergies = getattr(chosen_client, "allergy", [])
                 if isinstance(client_allergies, list) and client_allergies:
                     allergy_str = ", ".join([str(a) for a in client_allergies])
@@ -1094,7 +1439,7 @@ def show_staff_page(manager, user):
                     min_value=1.0,
                     step=1.0,
                     value=1.0,
-                    key=f"staff_hamper_item_{it_name}"
+                    key=f"hamper_item_{it_name}"
                 )
                 items_list.append({"name": it_name, "quantity": qty})
 
@@ -1131,7 +1476,7 @@ def show_staff_page(manager, user):
         )
 
     # =========================================================
-    # Food Hamper Detail (No Force Operations)
+    # Food Hamper Detail
     # =========================================================
 
     elif page == "Food Hamper Detail":
@@ -1155,8 +1500,8 @@ def show_staff_page(manager, user):
                 curr_status = target_hamper.status[0] if isinstance(target_hamper.status, list) and target_hamper.status else (target_hamper.status or "created")
                 client_obj = manager.find_client_by_id(target_hamper.client_id) if target_hamper.client_id else None
                 client_name = client_obj.name if client_obj else (f"ID: {target_hamper.client_id}" if target_hamper.client_id else "Unassigned")
-                client_email = getattr(client_obj, "email", "N/A") if client_obj else "N/A"
                 client_address = getattr(client_obj, "address", "N/A") if client_obj else "N/A"
+                client_email = getattr(client_obj, "email", "N/A") if client_obj else "N/A"
 
                 vol_obj = manager.find_volunteer_by_id(target_hamper.volunteer_id) if target_hamper.volunteer_id else None
                 vol_name = vol_obj.name if vol_obj else (f"ID: {target_hamper.volunteer_id}" if target_hamper.volunteer_id else "Unassigned")
@@ -1174,21 +1519,13 @@ def show_staff_page(manager, user):
 
                 col_left, col_right = st.columns(2)
                 with col_left:
-                    st.subheader("Recipient Information")
-                    st.write(f"**Client:** {client_name} (Email: {client_email})")
+                    st.subheader("Recipient Client Info")
+                    st.write(f"**Target Client:** {client_name} (Email: {client_email})")
                     st.write(f"**Delivery Address:** {client_address}")
                     st.write(f"**Hamper Notes:** {target_hamper.description or 'None'}")
 
-                    if client_obj:
-                        client_allergies = getattr(client_obj, "allergy", [])
-                        if isinstance(client_allergies, list) and client_allergies:
-                            allergy_str = ", ".join([str(a) for a in client_allergies])
-                            st.error(f"⚠️ **ALLERGY ALERT:** {allergy_str}")
-                        elif isinstance(client_allergies, str) and client_allergies.strip():
-                            st.error(f"⚠️ **ALLERGY ALERT:** {client_allergies.strip()}")
-
                 with col_right:
-                    st.subheader("Volunteer & Tracking")
+                    st.subheader("Delivery Volunteer Info")
                     st.write(f"**Assigned Volunteer:** {vol_name} (Email: {vol_email})")
                     last_updated = target_hamper.status_history[-1]["timestamp"] if getattr(target_hamper, "status_history", None) else "N/A"
                     st.write(f"**Last Status Updated:** {last_updated}")
@@ -1213,6 +1550,17 @@ def show_staff_page(manager, user):
                     st.dataframe(pd.DataFrame(history_rows), width="stretch", hide_index=True)
 
                 st.divider()
+                # Food Hamper Status Info
+                if curr_status.lower() == "delivered":
+                    st.success("This food hamper has been successfully delivered to the recipient.")
+                elif curr_status.lower() == "packed":
+                    st.info("This food hamper is packed and ready for delivery by the volunteer.")
+                elif curr_status.lower() == "assigned":
+                    st.info("This food hamper has been assigned to a volunteer for packing and delivery.")
+                else:
+                    st.info("This food hamper is newly created and awaiting volunteer assignment.")
+
+                st.write("")
                 btn_edit, btn_back = st.columns(2)
                 with btn_edit:
                     if st.button("Edit Food Hamper", width="stretch"):
@@ -1227,6 +1575,7 @@ def show_staff_page(manager, user):
     # =========================================================
     # Edit / Reassign Food Hamper
     # =========================================================
+
 
     elif page == "Edit Food Hamper":
         st.title("Edit / Reassign Food Hamper")
@@ -1249,6 +1598,7 @@ def show_staff_page(manager, user):
                 curr_status = target_hamper.status[0] if isinstance(target_hamper.status, list) and target_hamper.status else (target_hamper.status or "created")
                 st.subheader(f"Editing Food Hamper #{target_hamper.id}")
 
+                # Target Client
                 client_options = {"Unassigned": None}
                 for c in manager.clients:
                     client_options[f"ID: {c.id} - {c.name}"] = c.id
@@ -1264,6 +1614,15 @@ def show_staff_page(manager, user):
                 )
                 new_client_id = client_options[selected_client_label]
 
+                # Status
+                status_choices = ["created", "assigned", "packed", "delivered"]
+                new_status = st.selectbox(
+                    "Status",
+                    status_choices,
+                    index=status_choices.index(curr_status) if curr_status in status_choices else 0
+                )
+
+                # Force Reassign Volunteer
                 volunteer_options = {"Unassigned": None}
                 for v in manager.volunteers:
                     volunteer_options[f"ID: {v.id} - {v.name}"] = v.id
@@ -1273,12 +1632,13 @@ def show_staff_page(manager, user):
                         curr_vol_label = lbl
                         break
                 selected_vol_label = st.selectbox(
-                    "Assigned Volunteer (Reassign / Delegate)",
+                    "Assigned Volunteer (Force Reassign / Delegate)",
                     list(volunteer_options.keys()),
                     index=list(volunteer_options.keys()).index(curr_vol_label)
                 )
                 new_volunteer_id = volunteer_options[selected_vol_label]
 
+                # Description
                 new_description = st.text_area("Description", value=target_hamper.description or "")
 
                 # Items Modification (Allowed only when status is 'created')
@@ -1307,7 +1667,7 @@ def show_staff_page(manager, user):
                             min_value=1.0,
                             step=1.0,
                             value=prev_qty,
-                            key=f"staff_edit_hamper_item_{it_name}"
+                            key=f"edit_hamper_item_{it_name}"
                         )
                         new_hamper_items_list.append({"name": it_name, "quantity": qty})
                 else:
@@ -1322,10 +1682,12 @@ def show_staff_page(manager, user):
                                 client_id=new_client_id,
                                 volunteer_id=new_volunteer_id,
                                 description=new_description.strip(),
+                                status=new_status,
                                 items=new_hamper_items_list
                             )
+
                             st.session_state.staff_page = "Hamper Success"
-                            st.session_state.hamper_success_msg = f"Food Hamper #{target_hamper.id} details and assignment updated."
+                            st.session_state.hamper_success_msg = f"Food Hamper #{target_hamper.id} details and status updated."
                             del st.session_state.selected_hamper_id
                             st.rerun()
                         except Exception as e:
@@ -1416,32 +1778,35 @@ def show_staff_page(manager, user):
             term = st.selectbox(
                 "Term",
                 ["-", "ID", "NAME", "CATEGORY", "STOCK STATUS"],
-                key="staff_inventory_term"
+                key="inventory_term"
             )
         with right:
             if term == "ID":
-                search_term = st.number_input("Please enter the Item ID.", min_value=1, step=1, key="staff_inv_id_search")
+                search_term = st.number_input("Please enter the Item ID.", min_value=1, step=1, key="inv_id_search")
             elif term == "NAME":
-                search_term = st.text_input("Please enter the Item Name.", key="staff_inv_name_search")
+                search_term = st.text_input("Please enter the Item Name.", key="inv_name_search")
             elif term == "CATEGORY":
-                search_term = st.text_input("Please enter the Category.", key="staff_inv_cat_search")
+                search_term = st.text_input("Please enter the Category.", key="inv_cat_search")
             elif term == "STOCK STATUS":
-                search_term = st.selectbox("Please choose stock status.", ["In Stock", "Low Stock", "Out of Stock"], key="staff_inv_status_search")
+                search_term = st.selectbox("Stock Status", ["Normal", "Low Stock", "Out of Stock"], key="inv_status_search")
             else:
                 search_term = ""
 
-        all_items = manager.get_inventory_items()
-
+        inv_items = manager.get_inventory_items()
         inv_data = []
-        for item in all_items:
-            stock_status = "In Stock"
+
+        for item in inv_items:
             if item.quantity <= 0:
                 stock_status = "Out of Stock"
             elif item.quantity <= item.min_quantity:
                 stock_status = "Low Stock"
+            else:
+                stock_status = "Normal"
 
-            matched = True
-            if term == "ID":
+            matched = False
+            if term == "-":
+                matched = True
+            elif term == "ID":
                 matched = (item.id == search_term)
             elif term == "NAME":
                 matched = (search_term.lower() in item.name.lower())
@@ -1480,7 +1845,7 @@ def show_staff_page(manager, user):
                 },
                 hide_index=True,
                 width="stretch",
-                key="staff_inventory_table"
+                key="inventory_table"
             )
 
             col1, col2 = st.columns(2)
@@ -1488,7 +1853,7 @@ def show_staff_page(manager, user):
                 if st.button("Adjust Stock (Add / Deduct)", width="stretch"):
                     selected_rows = edited_inv[edited_inv["Select"] == True]
                     if len(selected_rows) == 0:
-                        st.error("Please select an item to adjust.")
+                        st.error("Please select an item.")
                     elif len(selected_rows) > 1:
                         st.error("Please select only one item.")
                     else:
@@ -1500,7 +1865,7 @@ def show_staff_page(manager, user):
                 if st.button("Edit Item Details", width="stretch"):
                     selected_rows = edited_inv[edited_inv["Select"] == True]
                     if len(selected_rows) == 0:
-                        st.error("Please select an item to edit.")
+                        st.error("Please select an item.")
                     elif len(selected_rows) > 1:
                         st.error("Please select only one item.")
                     else:
@@ -1509,23 +1874,22 @@ def show_staff_page(manager, user):
                         st.rerun()
 
         st.divider()
-        col_add_item, col_export_inv = st.columns(2)
+        col_add_item, col_exp_inv = st.columns(2)
         with col_add_item:
             if st.button("Add New Item Type", width="stretch"):
                 st.session_state.staff_page = "Add Item"
                 st.rerun()
-        with col_export_inv:
+        with col_exp_inv:
             if st.button("Export Inventory CSV", width="stretch"):
                 try:
                     filepath = manager.export_inventory_csv()
-                    st.success(f"Inventory exported to '{filepath}'.")
+                    st.success(f"Inventory report exported to '{filepath}'.")
                     with open(filepath, "rb") as f:
                         st.download_button(
                             label="Download Inventory CSV",
                             data=f.read(),
                             file_name=os.path.basename(filepath),
-                            mime="text/csv",
-                            width="stretch"
+                            mime="text/csv"
                         )
                 except Exception as e:
                     st.error(f"Failed to export inventory: {e}")
@@ -1535,19 +1899,19 @@ def show_staff_page(manager, user):
     # =========================================================
 
     elif page == "Add Item":
-        st.title("Add New Item to Inventory")
+        st.title("Add New Item Type")
 
-        item_name = st.text_input("Item Name")
-        item_category = st.text_input("Category", placeholder="e.g., Grains, Canned Goods, Produce")
+        item_name = st.text_input("Item Name (e.g., Canned Beans)")
+        item_category = st.text_input("Category (e.g., Canned Food, Grain, Dairy)")
+        item_unit = st.text_input("Unit (e.g., cans, kg, pcs, boxes)", value="pcs")
         initial_quantity = st.number_input("Initial Quantity", min_value=0.0, step=1.0, value=0.0)
-        item_unit = st.text_input("Unit", value="pcs")
         min_quantity = st.number_input("Minimum Alert Quantity", min_value=0.0, step=1.0, value=5.0)
 
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("Add Item", width="stretch"):
+            if st.button("Save New Item", width="stretch"):
                 if not item_name.strip() or not item_category.strip() or not item_unit.strip():
-                    st.error("Name, Category, and Unit are required.")
+                    st.error("Please fill in item name, category, and unit.")
                 else:
                     try:
                         manager.add_inventory_item(
@@ -1685,56 +2049,3 @@ def show_staff_page(manager, user):
             st.session_state.get("inv_success_msg", "Stock changes saved."),
             "Inventory"
         )
-
-    # =========================================================
-    # System Profile & Information (View Only for Staff)
-    # =========================================================
-
-    elif page == "System":
-        st.title("System Information")
-
-        current_address = getattr(manager, "address", "") or ""
-        current_description = getattr(manager, "description", "") or ""
-        stations = manager.get_stations()
-
-        col1, col2 = st.columns([1, 1])
-        with col1:
-            st.subheader("FoodBank Address")
-            st.info(current_address if current_address.strip() else "*(Not set)*")
-
-        with col2:
-            st.subheader("FoodBank Description")
-            st.info(current_description if current_description.strip() else "*(Not set)*")
-
-        st.markdown("---")
-        st.subheader("Collection Centers / Stations Directory")
-
-        stations_data = []
-        for station in stations:
-            stations_data.append({
-                "ID": station.get("id"),
-                "Station Name": station.get("name", ""),
-                "Station Address": station.get("address", ""),
-                "Select": False
-            })
-
-        if not stations_data:
-            st.info("No collection centers/stations registered yet.")
-        else:
-            station_df = pd.DataFrame(stations_data)
-            st.data_editor(
-                station_df,
-                column_config={
-                    "ID": st.column_config.NumberColumn("ID", width="small", disabled=True),
-                    "Station Name": st.column_config.TextColumn("Station Name", width="medium", disabled=True),
-                    "Station Address": st.column_config.TextColumn("Station Address", width="large", disabled=True),
-                    "Select": st.column_config.CheckboxColumn("Select", width="small")
-                },
-                hide_index=True,
-                width="stretch",
-                key="staff_stations_table"
-            )
-
-
-# Functional alias
-staff_page = show_staff_page
