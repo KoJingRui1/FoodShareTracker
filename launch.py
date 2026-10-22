@@ -46,7 +46,13 @@ def launch():
         st.session_state.current_page = "new_system"
         show_new_system_page(manager)
     elif st.session_state.current_page == "admin":
-        show_admin_page(manager)
+        user = st.session_state.get("user")
+        if user is None:
+            # If not logged in, redirect to main/login page
+            st.session_state.current_page = "main"
+            st.rerun()
+        else:
+            show_admin_page(manager, user)
     else:
         st.session_state.current_page = "main"
         show_main_page(manager)

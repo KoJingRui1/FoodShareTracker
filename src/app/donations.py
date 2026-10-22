@@ -5,12 +5,13 @@ except ModuleNotFoundError:
 
 
 class Donation:
-    def __init__(self, id, donor_id, description="", status="created", volunteer_id=None):
+    def __init__(self, id, donor_id, description="", status="created", volunteer_id=None, station=None):
         self.id = id
         self.donor_id = donor_id
         self.description = description
         self.status = status
         self.volunteer_id = volunteer_id
+        self.station = station
         self.items = []
         self.flagged_issue = None
         self.previous_status = None

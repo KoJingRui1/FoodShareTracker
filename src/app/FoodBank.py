@@ -214,7 +214,8 @@ class FoodBank:
                 donation = Donation(
                     donation_data["id"], donation_data.get("donor_id"),
                     donation_data["description"], status=status,
-                    volunteer_id=donation_data.get("volunteer_id")
+                    volunteer_id=donation_data.get("volunteer_id"),
+                    station=donation_data.get("station")
                 )
                 donation.items = donation_data.get("items", [])
                 donation.flagged_issue = donation_data.get("flagged_issue", None)
@@ -247,15 +248,22 @@ class FoodBank:
             self.description = data.get("description") or self.food_bank_data.get("description", "")
             raw_centers = data.get("collection_centers") or self.food_bank_data.get("collection_centers", [])
             self.collection_centers = []
+            max_station_id = 0
             if isinstance(raw_centers, list):
-                for c in raw_centers:
+                for idx, c in enumerate(raw_centers, start=1):
                     if isinstance(c, dict):
+                        sid = c.get("id") or idx
+                        max_station_id = max(max_station_id, int(sid))
                         self.collection_centers.append({
+                            "id": int(sid),
                             "name": str(c.get("name", "")),
                             "address": str(c.get("address", ""))
                         })
                     elif isinstance(c, str):
-                        self.collection_centers.append({"name": c, "address": ""})
+                        max_station_id = max(max_station_id, idx)
+                        self.collection_centers.append({"id": idx, "name": c, "address": ""})
+            if "next_station_id" not in self.food_bank_data:
+                self.food_bank_data["next_station_id"] = max_station_id + 1
             self.food_bank_data["address"] = self.address
             self.food_bank_data["description"] = self.description
             self.food_bank_data["collection_centers"] = self.collection_centers
@@ -679,7 +687,7 @@ class FoodBank:
         return user
 
     # Donation management.
-    def add_donation(self, donor_id, description="", items=None):
+    def add_donation(self, donor_id, description="", items=None, station=None):
         donor = self.find_donor_by_id(donor_id)
         if donor is None:
             raise ValueError(f"Donor ID {donor_id} does not exist.")
@@ -688,7 +696,8 @@ class FoodBank:
             donor_id,
             description=description,
             status="created",
-            volunteer_id=None
+            volunteer_id=None,
+            station=station
         )
         if items is not None:
             if isinstance(items, dict):
@@ -704,20 +713,27 @@ class FoodBank:
         self._save_data()
         return donation
 
-    def collect_donation(self, donation_id, volunteer_id):
-        """Marks donation as collected by a volunteer, recording volunteer ID."""
+    def collect_donation(self, donation_id, volunteer_id=None):
+        """Marks donation as collected by a volunteer or directly by staff/admin."""
         donation = self.find_donation_by_id(donation_id)
         if donation is None:
             raise ValueError(f"Donation ID {donation_id} does not exist.")
-        volunteer = self.find_volunteer_by_id(volunteer_id)
-        if volunteer is None:
-            raise ValueError(f"Volunteer ID {volunteer_id} does not exist.")
         
+        target_vol_id = volunteer_id if volunteer_id is not None else donation.volunteer_id
+        if target_vol_id is not None:
+            volunteer = self.find_volunteer_by_id(target_vol_id)
+            if volunteer is None:
+                raise ValueError(f"Volunteer ID {target_vol_id} does not exist.")
+            donation.volunteer_id = volunteer.id
+            if hasattr(volunteer, "work") and hasattr(volunteer, "completed_work"):
+                for job_item in [donation.id, str(donation.id), f"collect_donation_{donation.id}", f"donation_{donation.id}"]:
+                    if job_item in volunteer.work:
+                        volunteer.work.remove(job_item)
+                        if job_item not in volunteer.completed_work:
+                            volunteer.completed_work.append(job_item)
+
         self._update_status(donation, "collected")
-        donation.volunteer_id = volunteer.id
-        if hasattr(volunteer, "work") and donation.id not in volunteer.work:
-            volunteer.work.append(donation.id)
-        logging.info(f"Donation ID {donation_id} collected by volunteer ID {volunteer_id}")
+        logging.info(f"Donation ID {donation_id} collected (volunteer: {donation.volunteer_id})")
         self._save_data()
         return donation
 
@@ -728,7 +744,7 @@ class FoodBank:
             raise ValueError(f"Donation ID {donation_id} does not exist.")
         
         curr_status = donation.status[0] if isinstance(donation.status, list) and donation.status else (donation.status or "")
-        if str(curr_status).lower() not in ("collected", "created"):
+        if str(curr_status).lower() not in ("collected", "created", "assigned"):
             raise ValueError(f"Cannot stock donation {donation_id} with status '{curr_status}'.")
 
         stocked_items = []
@@ -763,6 +779,28 @@ class FoodBank:
     def update_donation(self, donation_id, **fields):
         donation = self.find_donation_by_id(donation_id)
         if donation is None: return None
+
+        # Auto unbind from previous volunteer's work list if volunteer_id changed or unassigned
+        prev_vol_id = getattr(donation, "volunteer_id", None)
+        new_vol_id = fields.get("volunteer_id", prev_vol_id) if "volunteer_id" in fields else prev_vol_id
+
+        if "volunteer_id" in fields and str(new_vol_id) != str(prev_vol_id):
+            if prev_vol_id:
+                prev_vol = self.find_volunteer_by_id(prev_vol_id)
+                if prev_vol and hasattr(prev_vol, "work") and donation.id in prev_vol.work:
+                    prev_vol.work.remove(donation.id)
+            if new_vol_id:
+                new_vol = self.find_volunteer_by_id(new_vol_id)
+                if new_vol and hasattr(new_vol, "work") and donation.id not in new_vol.work:
+                    new_vol.work.append(donation.id)
+
+        # Automatic fallback: If volunteer becomes None/Unassigned and status was collected, return to 'created'
+        curr_status = donation.status[0] if isinstance(donation.status, list) and donation.status else (donation.status or "")
+        if "volunteer_id" in fields and fields["volunteer_id"] in (None, "", 0):
+            target_status = fields.get("status", curr_status)
+            if str(target_status).lower() == "collected":
+                fields["status"] = "created"
+
         for field, value in fields.items():
             if field.startswith("_") or field == "id":
                 raise ValueError(f"Cannot update protected field '{field}'.")
@@ -849,6 +887,28 @@ class FoodBank:
     def update_food_hamper(self, hamper_id, **fields):
         hamper = self.find_food_hamper_by_id(hamper_id)
         if hamper is None: return None
+
+        # Auto unbind from previous volunteer's work list if volunteer_id changed or unassigned
+        prev_vol_id = getattr(hamper, "volunteer_id", None)
+        new_vol_id = fields.get("volunteer_id", prev_vol_id) if "volunteer_id" in fields else prev_vol_id
+
+        if "volunteer_id" in fields and str(new_vol_id) != str(prev_vol_id):
+            if prev_vol_id:
+                prev_vol = self.find_volunteer_by_id(prev_vol_id)
+                if prev_vol and hasattr(prev_vol, "work") and hamper.id in prev_vol.work:
+                    prev_vol.work.remove(hamper.id)
+            if new_vol_id:
+                new_vol = self.find_volunteer_by_id(new_vol_id)
+                if new_vol and hasattr(new_vol, "work") and hamper.id not in new_vol.work:
+                    new_vol.work.append(hamper.id)
+
+        # Automatic fallback: If volunteer becomes None/Unassigned and status was assigned, return to 'created'
+        curr_status = hamper.status[0] if isinstance(hamper.status, list) and hamper.status else (hamper.status or "")
+        if "volunteer_id" in fields and fields["volunteer_id"] in (None, "", 0):
+            target_status = fields.get("status", curr_status)
+            if str(target_status).lower() == "assigned":
+                fields["status"] = "created"
+
         for field, value in fields.items():
             if field.startswith("_") or field == "id":
                 raise ValueError(f"Cannot update protected field '{field}'.")
@@ -1658,44 +1718,51 @@ class FoodBank:
         }
 
     def add_collection_center(self, name, address):
-        """Adds a new collection center with a name and address."""
+        """Adds a new collection center with an id, name, and address."""
         if not isinstance(name, str) or not name.strip():
             raise ValueError("Collection center name cannot be empty.")
+        station_id = self.food_bank_data.get("next_station_id", 1)
+        # Ensure station_id is unique
+        existing_ids = [c.get("id", 0) for c in self.collection_centers]
+        while station_id in existing_ids:
+            station_id += 1
         center = {
+            "id": int(station_id),
             "name": name.strip(),
             "address": str(address or "").strip()
         }
         self.collection_centers.append(center)
+        self.food_bank_data["next_station_id"] = station_id + 1
         self.food_bank_data["collection_centers"] = self.collection_centers
-        logging.info(f"Added collection center: '{center['name']}' at '{center['address']}'")
+        logging.info(f"Added collection center ID {center['id']}: '{center['name']}' at '{center['address']}'")
         self._save_data()
         return center
 
-    def remove_collection_center(self, name):
-        """Removes a collection center matching the given name."""
+    def remove_collection_center(self, identifier):
+        """Removes a collection center matching the given id or name."""
         initial_count = len(self.collection_centers)
+        id_str = str(identifier).strip().lower()
         self.collection_centers = [
             c for c in self.collection_centers
-            if c.get("name", "").strip().lower() != str(name).strip().lower()
+            if str(c.get("id")) != id_str and c.get("name", "").strip().lower() != id_str
         ]
         self.food_bank_data["collection_centers"] = self.collection_centers
         if len(self.collection_centers) < initial_count:
-            logging.info(f"Removed collection center: '{name}'")
+            logging.info(f"Removed collection center: '{identifier}'")
             self._save_data()
             return True
         return False
 
     def update_collection_center(self, identifier, new_name=None, new_address=None):
-        """Updates the name and/or address of an existing collection center or station by name or index."""
+        """Updates the name and/or address of an existing collection center or station by id, name, or index."""
         target_center = None
-        if isinstance(identifier, int) and 0 <= identifier < len(self.collection_centers):
+        id_str = str(identifier).strip().lower()
+        for c in self.collection_centers:
+            if str(c.get("id")) == id_str or c.get("name", "").strip().lower() == id_str:
+                target_center = c
+                break
+        if target_center is None and isinstance(identifier, int) and 0 <= identifier < len(self.collection_centers):
             target_center = self.collection_centers[identifier]
-        else:
-            name_str = str(identifier).strip().lower()
-            for c in self.collection_centers:
-                if c.get("name", "").strip().lower() == name_str:
-                    target_center = c
-                    break
 
         if target_center is None:
             raise ValueError(f"Collection center or station '{identifier}' not found.")
@@ -1713,6 +1780,16 @@ class FoodBank:
     def modify_collection_center(self, identifier, new_name=None, new_address=None):
         """Alias for update_collection_center."""
         return self.update_collection_center(identifier, new_name=new_name, new_address=new_address)
+
+    def find_station_by_id(self, station_id):
+        """Finds a collection center / station by its ID."""
+        id_str = str(station_id).strip()
+        for c in self.collection_centers:
+            if str(c.get("id")) == id_str:
+                return c
+        return None
+
+    find_collection_center_by_id = find_station_by_id
 
     def get_collection_centers(self):
         """Returns the list of collection centers."""
@@ -1910,7 +1987,7 @@ class FoodBank:
 
         filepath.parent.mkdir(parents=True, exist_ok=True)
         headers = [
-            "Donation ID", "Description", "Donor ID", "Donor Name",
+            "Donation ID", "Description", "Donor ID", "Donor Name", "Station",
             "Volunteer ID", "Volunteer Name", "Status", "Status Updated At", "Items", "Flagged Issue"
         ]
 
@@ -1926,9 +2003,10 @@ class FoodBank:
                 status_time = d.status_history[-1]["timestamp"] if getattr(d, "status_history", None) else ""
                 items_str = self._format_item_summary(d.items)
                 issue_str = d.flagged_issue.get("issue", "") if getattr(d, "flagged_issue", None) else "None"
+                station_str = getattr(d, "station", "") or "Unspecified"
 
                 writer.writerow([
-                    d.id, d.description, d.donor_id or "", donor_name,
+                    d.id, d.description, d.donor_id or "", donor_name, station_str,
                     d.volunteer_id or "", vol_name, status_str, status_time, items_str, issue_str
                 ])
 
