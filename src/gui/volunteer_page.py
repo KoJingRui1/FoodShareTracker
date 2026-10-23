@@ -298,23 +298,44 @@ def show_volunteer_page(manager, user):
 
                     st.divider()
 
-                    # Report / Flag Issue Section
-                    if getattr(target_hamper, "flagged_issue", None):
-                        st.warning(f"⚠️ **Reported Issue on Record:** {target_hamper.flagged_issue.get('issue')} (Reported at {target_hamper.flagged_issue.get('flagged_at')})")
+                    # Report / Flag & Self-Resolution Section
+                    if curr_status.lower() == "flagged" or getattr(target_hamper, "flagged_issue", None):
+                        flg = getattr(target_hamper, "flagged_issue", {}) or {}
+                        flg_time = flg.get("reported_at") or flg.get("flagged_at") or "Recently"
+                        flg_txt = flg.get("issue", "Reported obstacle on delivery route")
+                        prev_st = getattr(target_hamper, "previous_status", None) or "packed"
 
-                    st.subheader("Report an Issue / Obstacle")
-                    st.caption("If you encounter any problem (e.g. client not at home, incorrect address, damaged items), report it immediately.")
-                    issue_text = st.text_input("Issue Description", placeholder="e.g. Client not at home / Address unreachable", key=f"hamper_issue_{target_hamper.id}")
-                    if st.button("Submit Issue Report", key=f"btn_flag_hamper_{target_hamper.id}"):
-                        if not issue_text.strip():
-                            st.error("Please enter a description of the issue.")
-                        else:
+                        st.warning(f"⚠️ **Reported Issue on Record:** {flg_txt} *(Reported at: {flg_time})*")
+
+                        st.subheader("Resolve Issue on Site")
+                        st.info("If the obstacle has been resolved (e.g. client answered the door, correct address located), you can resolve it here to immediately resume delivery.")
+                        vol_res_notes = st.text_input(
+                            "Resolution Notes",
+                            placeholder="e.g. Client returned home and received delivery",
+                            key=f"vol_res_hamper_txt_{target_hamper.id}"
+                        )
+                        if st.button("✅ Mark Issue as Resolved & Resume Delivery", key=f"btn_vol_res_hamper_{target_hamper.id}", width="stretch"):
                             try:
-                                manager.flag_issue("hamper", target_hamper.id, issue_text.strip(), volunteer_id=user.id)
-                                st.success("Issue reported successfully to FoodBank staff.")
+                                note_str = vol_res_notes.strip() if vol_res_notes.strip() else "Resolved on site by volunteer"
+                                manager.resolve_issue("hamper", target_hamper.id, resolution_notes=note_str, resolved_by=f"Volunteer {user.name} (ID: {user.id})")
+                                st.success(f"Issue marked as resolved! Hamper restored to '{prev_st.upper()}' status.")
                                 st.rerun()
                             except Exception as e:
-                                st.error(f"Failed to report issue: {e}")
+                                st.error(f"Failed to resolve issue: {e}")
+                    else:
+                        st.subheader("Report an Issue / Obstacle")
+                        st.caption("If you encounter any problem (e.g. client not at home, incorrect address, damaged items), report it immediately.")
+                        issue_text = st.text_input("Issue Description", placeholder="e.g. Client not at home / Address unreachable", key=f"hamper_issue_{target_hamper.id}")
+                        if st.button("Submit Issue Report", key=f"btn_flag_hamper_{target_hamper.id}"):
+                            if not issue_text.strip():
+                                st.error("Please enter a description of the issue.")
+                            else:
+                                try:
+                                    manager.flag_issue("hamper", target_hamper.id, issue_text.strip(), volunteer_id=user.id)
+                                    st.success("Issue reported successfully to FoodBank staff.")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Failed to report issue: {e}")
 
                     st.write("")
                     if st.button("Back to Active Jobs"):
@@ -419,23 +440,44 @@ def show_volunteer_page(manager, user):
 
                     st.divider()
 
-                    # Report / Flag Issue Section
-                    if getattr(target_donation, "flagged_issue", None):
-                        st.warning(f"⚠️ **Reported Issue on Record:** {target_donation.flagged_issue.get('issue')} (Reported at {target_donation.flagged_issue.get('flagged_at')})")
+                    # Report / Flag & Self-Resolution Section
+                    if curr_status.lower() == "flagged" or getattr(target_donation, "flagged_issue", None):
+                        flg = getattr(target_donation, "flagged_issue", {}) or {}
+                        flg_time = flg.get("reported_at") or flg.get("flagged_at") or "Recently"
+                        flg_txt = flg.get("issue", "Reported obstacle during collection")
+                        prev_st = getattr(target_donation, "previous_status", None) or "assigned"
 
-                    st.subheader("Report an Issue / Obstacle")
-                    st.caption("If you encounter any problem (e.g. donor absent, damaged items, incorrect station), report it immediately.")
-                    issue_text = st.text_input("Issue Description", placeholder="e.g. Donor absent / Station locker locked", key=f"don_issue_{target_donation.id}")
-                    if st.button("Submit Issue Report", key=f"btn_flag_don_{target_donation.id}"):
-                        if not issue_text.strip():
-                            st.error("Please enter a description of the issue.")
-                        else:
+                        st.warning(f"⚠️ **Reported Issue on Record:** {flg_txt} *(Reported at: {flg_time})*")
+
+                        st.subheader("Resolve Issue on Site")
+                        st.info("If the obstacle has been resolved (e.g. donor arrived, station access cleared), you can resolve it here to immediately resume collection.")
+                        vol_don_res_notes = st.text_input(
+                            "Resolution Notes",
+                            placeholder="e.g. Donor met at pickup point, donation received",
+                            key=f"vol_res_don_txt_{target_donation.id}"
+                        )
+                        if st.button("✅ Mark Issue as Resolved & Resume Collection", key=f"btn_vol_res_don_{target_donation.id}", width="stretch"):
                             try:
-                                manager.flag_issue("donation", target_donation.id, issue_text.strip(), volunteer_id=user.id)
-                                st.success("Issue reported successfully to FoodBank staff.")
+                                note_str = vol_don_res_notes.strip() if vol_don_res_notes.strip() else "Resolved on site by volunteer"
+                                manager.resolve_issue("donation", target_donation.id, resolution_notes=note_str, resolved_by=f"Volunteer {user.name} (ID: {user.id})")
+                                st.success(f"Issue marked as resolved! Donation restored to '{prev_st.upper()}' status.")
                                 st.rerun()
                             except Exception as e:
-                                st.error(f"Failed to report issue: {e}")
+                                st.error(f"Failed to resolve issue: {e}")
+                    else:
+                        st.subheader("Report an Issue / Obstacle")
+                        st.caption("If you encounter any problem (e.g. donor absent, damaged items, incorrect station), report it immediately.")
+                        issue_text = st.text_input("Issue Description", placeholder="e.g. Donor absent / Station locker locked", key=f"don_issue_{target_donation.id}")
+                        if st.button("Submit Issue Report", key=f"btn_flag_don_{target_donation.id}"):
+                            if not issue_text.strip():
+                                st.error("Please enter a description of the issue.")
+                            else:
+                                try:
+                                    manager.flag_issue("donation", target_donation.id, issue_text.strip(), volunteer_id=user.id)
+                                    st.success("Issue reported successfully to FoodBank staff.")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Failed to report issue: {e}")
 
                     st.write("")
                     if st.button("Back to Active Jobs"):

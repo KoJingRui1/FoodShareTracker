@@ -86,10 +86,25 @@ def show_client_page(manager, user):
         user_id_str = str(user.id)
         my_hampers = [h for h in manager.food_hampers if str(h.client_id) == user_id_str]
 
+        # Top summary metrics
+        total_hampers = len(my_hampers)
+        received_hampers = sum(1 for h in my_hampers if str(h.status[0] if isinstance(h.status, list) and h.status else (h.status or "")).lower() == "delivered")
+        active_hampers = total_hampers - received_hampers
+
+        m1, m2, m3 = st.columns(3)
+        with m1:
+            st.metric("Total Requested", total_hampers)
+        with m2:
+            st.metric("Active / In Transit", active_hampers)
+        with m3:
+            st.metric("Successfully Received", received_hampers)
+
+        st.divider()
+
         # Status filter
         col_f1, col_f2 = st.columns([1, 3])
         with col_f1:
-            status_filter = st.selectbox("Filter by Status", ["All", "created", "assigned", "packed", "delivered"])
+            status_filter = st.selectbox("Filter by Status", ["All", "created", "assigned", "packed", "delivered", "flagged"])
 
         filtered_hampers = []
         for h in my_hampers:
