@@ -1446,22 +1446,38 @@ def show_admin_page(manager, user):
                 with col1:
                     if st.button("Save Changes", width="stretch"):
                         try:
-                            manager.update_donation(
-                                target_donation.id,
-                                donor_id=new_donor_id,
-                                volunteer_id=new_volunteer_id,
-                                station=new_station_id,
-                                description=new_description.strip(),
-                                status=new_status,
-                                items=new_items_list
-                            )
-                            if curr_status.lower() != new_status.lower():
-                                if new_status.lower() == "collected":
+                            if curr_status.lower() != new_status.lower() and new_status.lower() == "stocked":
+                                manager.update_donation(
+                                    target_donation.id,
+                                    donor_id=new_donor_id,
+                                    volunteer_id=new_volunteer_id,
+                                    station=new_station_id,
+                                    description=new_description.strip(),
+                                    items=new_items_list
+                                )
+                                if curr_status.lower() in ("created", "assigned"):
                                     manager.collect_donation(target_donation.id, new_volunteer_id)
-                                elif new_status.lower() == "stocked":
-                                    if curr_status.lower() in ("created", "assigned"):
-                                        manager.collect_donation(target_donation.id, new_volunteer_id)
-                                    manager.stock_donation(target_donation.id)
+                                manager.stock_donation(target_donation.id)
+                            elif curr_status.lower() != new_status.lower() and new_status.lower() == "collected":
+                                manager.update_donation(
+                                    target_donation.id,
+                                    donor_id=new_donor_id,
+                                    volunteer_id=new_volunteer_id,
+                                    station=new_station_id,
+                                    description=new_description.strip(),
+                                    items=new_items_list
+                                )
+                                manager.collect_donation(target_donation.id, new_volunteer_id)
+                            else:
+                                manager.update_donation(
+                                    target_donation.id,
+                                    donor_id=new_donor_id,
+                                    volunteer_id=new_volunteer_id,
+                                    station=new_station_id,
+                                    description=new_description.strip(),
+                                    status=new_status,
+                                    items=new_items_list
+                                )
 
                             st.session_state.admin_page = "Donation Success"
                             st.session_state.donation_success_msg = f"Donation #{target_donation.id} details and assignment have been updated."

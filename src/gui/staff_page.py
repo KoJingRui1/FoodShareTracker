@@ -1221,22 +1221,38 @@ def show_staff_page(manager, user):
                 with col1:
                     if st.button("Save Changes", width="stretch"):
                         try:
-                            manager.update_donation(
-                                target_donation.id,
-                                donor_id=new_donor_id,
-                                volunteer_id=new_volunteer_id,
-                                station=new_station_id,
-                                description=new_description.strip(),
-                                status=new_status,
-                                items=new_items_list
-                            )
-                            if curr_status.lower() != new_status.lower():
-                                if new_status.lower() == "collected":
+                            if curr_status.lower() != new_status.lower() and new_status.lower() == "stocked":
+                                manager.update_donation(
+                                    target_donation.id,
+                                    donor_id=new_donor_id,
+                                    volunteer_id=new_volunteer_id,
+                                    station=new_station_id,
+                                    description=new_description.strip(),
+                                    items=new_items_list
+                                )
+                                if curr_status.lower() in ("created", "assigned"):
                                     manager.collect_donation(target_donation.id, new_volunteer_id)
-                                elif new_status.lower() == "stocked":
-                                    if curr_status.lower() in ("created", "assigned"):
-                                        manager.collect_donation(target_donation.id, new_volunteer_id)
-                                    manager.stock_donation(target_donation.id)
+                                manager.stock_donation(target_donation.id)
+                            elif curr_status.lower() != new_status.lower() and new_status.lower() == "collected":
+                                manager.update_donation(
+                                    target_donation.id,
+                                    donor_id=new_donor_id,
+                                    volunteer_id=new_volunteer_id,
+                                    station=new_station_id,
+                                    description=new_description.strip(),
+                                    items=new_items_list
+                                )
+                                manager.collect_donation(target_donation.id, new_volunteer_id)
+                            else:
+                                manager.update_donation(
+                                    target_donation.id,
+                                    donor_id=new_donor_id,
+                                    volunteer_id=new_volunteer_id,
+                                    station=new_station_id,
+                                    description=new_description.strip(),
+                                    status=new_status,
+                                    items=new_items_list
+                                )
 
                             st.session_state.staff_page = "Donation Success"
                             st.session_state.donation_success_msg = f"Donation #{target_donation.id} details and assignment have been updated."
@@ -1561,6 +1577,29 @@ def show_staff_page(manager, user):
                 else:
                     st.info("This food hamper is newly created and awaiting volunteer assignment.")
 
+                # Warehouse Operations (Pack / Unpack)
+                if curr_status.lower() in ("created", "assigned"):
+                    st.subheader("Warehouse Operations")
+                    st.info("Packing will verify inventory availability, deduct packed quantities, and set status to 'packed'.")
+                    if st.button("Pack Food Hamper (Deduct Inventory)", width="stretch"):
+                        try:
+                            manager.pack_food_hamper(target_hamper.id)
+                            st.success(f"Hamper #{target_hamper.id} has been successfully packed and inventory deducted!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Cannot pack hamper: {e}")
+
+                elif curr_status.lower() == "packed":
+                    st.subheader("Warehouse Operations")
+                    st.info("Hamper is currently packed (inventory already deducted). You can unpack to return items to inventory.")
+                    if st.button("Unpack Hamper (Return Items to Stock)", width="stretch"):
+                        try:
+                            manager.unpack_food_hamper(target_hamper.id)
+                            st.success(f"Hamper #{target_hamper.id} unpacked. All items returned to inventory!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Cannot unpack hamper: {e}")
+
                 st.write("")
                 btn_edit, btn_back = st.columns(2)
                 with btn_edit:
@@ -1678,14 +1717,47 @@ def show_staff_page(manager, user):
                 with col1:
                     if st.button("Save Changes", width="stretch"):
                         try:
-                            manager.update_food_hamper(
-                                target_hamper.id,
-                                client_id=new_client_id,
-                                volunteer_id=new_volunteer_id,
-                                description=new_description.strip(),
-                                status=new_status,
-                                items=new_hamper_items_list
-                            )
+                            # If staff explicitly changes status from created/assigned to packed, trigger physical deduction
+                            if curr_status.lower() in ("created", "assigned") and new_status.lower() == "packed":
+                                manager.update_food_hamper(
+                                    target_hamper.id,
+                                    client_id=new_client_id,
+                                    volunteer_id=new_volunteer_id,
+                                    description=new_description.strip(),
+                                    items=new_hamper_items_list
+                                )
+                                manager.pack_food_hamper(target_hamper.id)
+                            # If staff changes status to delivered
+                            elif new_status.lower() == "delivered" and curr_status.lower() != "delivered":
+                                manager.update_food_hamper(
+                                    target_hamper.id,
+                                    client_id=new_client_id,
+                                    volunteer_id=new_volunteer_id,
+                                    description=new_description.strip(),
+                                    items=new_hamper_items_list
+                                )
+                                if curr_status.lower() in ("created", "assigned"):
+                                    manager.pack_food_hamper(target_hamper.id)
+                                manager.deliver_food_hamper(target_hamper.id)
+                            # If staff unpacks back from packed to created/assigned, return items
+                            elif curr_status.lower() == "packed" and new_status.lower() in ("created", "assigned"):
+                                manager.unpack_food_hamper(target_hamper.id)
+                                manager.update_food_hamper(
+                                    target_hamper.id,
+                                    client_id=new_client_id,
+                                    volunteer_id=new_volunteer_id,
+                                    description=new_description.strip(),
+                                    status=new_status
+                                )
+                            else:
+                                manager.update_food_hamper(
+                                    target_hamper.id,
+                                    client_id=new_client_id,
+                                    volunteer_id=new_volunteer_id,
+                                    description=new_description.strip(),
+                                    status=new_status,
+                                    items=new_hamper_items_list
+                                )
 
                             st.session_state.staff_page = "Hamper Success"
                             st.session_state.hamper_success_msg = f"Food Hamper #{target_hamper.id} details and status updated."

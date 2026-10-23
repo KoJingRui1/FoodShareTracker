@@ -119,57 +119,40 @@ def show_client_page(manager, user):
             else:
                 st.info(f"No food hampers found with status '{status_filter}'.")
         else:
-            hamper_df = pd.DataFrame(filtered_hampers)
-            edited_hampers = st.data_editor(
-                hamper_df,
-                column_config={
-                    "ID": st.column_config.NumberColumn("ID", width="small", disabled=True),
-                    "Status": st.column_config.TextColumn("Status", width="small", disabled=True),
-                    "Assigned Volunteer": st.column_config.TextColumn("Assigned Volunteer", width="medium", disabled=True),
-                    "Items Count": st.column_config.NumberColumn("Items Count", width="small", disabled=True),
-                    "Delivery Address": st.column_config.TextColumn("Delivery Address", width="large", disabled=True),
-                    "Last Updated": st.column_config.TextColumn("Last Updated", width="medium", disabled=True),
-                    "Select": st.column_config.CheckboxColumn("Select", width="small")
-                },
-                hide_index=True,
-                width="stretch",
-                key="client_hampers_table"
-            )
+            for item in filtered_hampers:
+                target_id = item["ID"]
+                with st.container(border=True):
+                    h_col1, h_col2 = st.columns([3, 1])
+                    with h_col1:
+                        st.markdown(f"#### 🍲 Food Hamper #{target_id}")
+                    with h_col2:
+                        st.markdown(f"**Status:** `{item['Status']}`")
 
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("View Hamper Details & Confirm Receipt", width="stretch"):
-                    selected_rows = edited_hampers[edited_hampers["Select"] == True]
-                    if len(selected_rows) == 0:
-                        st.error("Please select a food hamper.")
-                    elif len(selected_rows) > 1:
-                        st.error("Please select only one food hamper.")
-                    else:
-                        st.session_state.selected_hamper_id = int(selected_rows.iloc[0]["ID"])
-                        st.session_state.client_page = "Hamper Detail"
-                        st.rerun()
+                    d_col1, d_col2 = st.columns(2)
+                    with d_col1:
+                        st.write(f"🚚 **Volunteer:** {item['Assigned Volunteer']}")
+                        st.write(f"📍 **Address:** {item['Delivery Address']}")
+                    with d_col2:
+                        st.write(f"📦 **Items:** {item['Items Count']} item(s)")
+                        st.write(f"🕒 **Last Updated:** {item['Last Updated']}")
 
-            with col2:
-                if st.button("Cancel Pending Request", width="stretch"):
-                    selected_rows = edited_hampers[edited_hampers["Select"] == True]
-                    if len(selected_rows) == 0:
-                        st.error("Please select a request to cancel.")
-                    elif len(selected_rows) > 1:
-                        st.error("Please select only one request.")
-                    else:
-                        target_id = int(selected_rows.iloc[0]["ID"])
-                        target_h = manager.find_food_hamper_by_id(target_id)
-                        curr_st = target_h.status[0] if target_h and isinstance(target_h.status, list) and target_h.status else (getattr(target_h, "status", "") or "created")
-
-                        if str(curr_st).lower() != "created":
-                            st.error(f"Cannot cancel Hamper #{target_id} with status '{curr_st}'. Requests can only be cancelled while in 'created' status before volunteer assignment.")
+                    act_c1, act_c2 = st.columns(2)
+                    with act_c1:
+                        if st.button("🔍 View Details & Confirm Receipt", key=f"btn_hmp_det_{target_id}", width="stretch"):
+                            st.session_state.selected_hamper_id = target_id
+                            st.session_state.client_page = "Hamper Detail"
+                            st.rerun()
+                    with act_c2:
+                        if item["Status"].lower() == "created":
+                            if st.button("❌ Cancel Request", key=f"btn_hmp_del_{target_id}", width="stretch"):
+                                try:
+                                    manager.delete_food_hamper(target_id)
+                                    st.success(f"Food hamper request #{target_id} has been cancelled.")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Cannot cancel request: {e}")
                         else:
-                            try:
-                                manager.delete_food_hamper(target_id)
-                                st.success(f"Food hamper request #{target_id} has been cancelled.")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Cannot cancel request: {e}")
+                            st.caption("🔒 Status locked (assigned / packed / delivered)")
 
         st.divider()
         if st.button("Submit New Assistance Request", width="stretch"):
@@ -204,14 +187,14 @@ def show_client_page(manager, user):
                 if str(curr_status).lower() == "created":
                     st.info("📌 **Status: CREATED.** Your request has been registered and is awaiting preparation by the FoodBank warehouse.")
                 elif str(curr_status).lower() == "assigned":
-                    st.warning("🚚 **Status: ASSIGNED.** A volunteer has been assigned to your delivery. Warehouse staff is preparing your package.")
+                    st.info("🚚 **Status: ASSIGNED.** A volunteer has been assigned to your delivery. Warehouse staff is preparing and packing your package.")
                 elif str(curr_status).lower() == "packed":
                     st.success("📦 **Status: PACKED & OUT FOR DELIVERY!** Your hamper has been packed and is with the volunteer for delivery.")
                 elif str(curr_status).lower() == "delivered":
                     st.success("🎉 **Status: DELIVERED.** You have confirmed receipt of this food hamper package. Enjoy your meals!")
 
-                # Confirmation Box when packed or assigned
-                if str(curr_status).lower() in ("packed", "assigned"):
+                # Confirmation Box ONLY when packed
+                if str(curr_status).lower() == "packed":
                     st.markdown("---")
                     st.subheader("📬 Confirm Delivery Handover")
                     st.info("Has the volunteer arrived and handed you this food hamper package?")
@@ -261,18 +244,25 @@ def show_client_page(manager, user):
                 if not target_hamper.items:
                     st.info("No items listed in this package.")
                 else:
-                    items_rows = []
-                    for it in target_hamper.items:
-                        if isinstance(it, dict):
-                            items_rows.append({"Item Name": it.get("name"), "Quantity": it.get("quantity")})
-                        else:
-                            items_rows.append({"Item Name": getattr(it, "name", str(it)), "Quantity": getattr(it, "quantity", 1)})
-                    st.dataframe(pd.DataFrame(items_rows), width="stretch", hide_index=True)
+                    with st.container(border=True):
+                        for it in target_hamper.items:
+                            if isinstance(it, dict):
+                                it_name = it.get("name", "Item")
+                                it_qty = it.get("quantity", 1)
+                            else:
+                                it_name = getattr(it, "name", str(it))
+                                it_qty = getattr(it, "quantity", 1)
+                            c1, c2 = st.columns([3, 1])
+                            with c1:
+                                st.markdown(f"🍲 **{it_name}**")
+                            with c2:
+                                st.markdown(f"**Quantity:** `{it_qty}`")
 
                 if getattr(target_hamper, "status_history", None):
                     st.subheader("Status Timeline History")
-                    history_rows = [{"Status": h.get("status"), "Timestamp": h.get("timestamp")} for h in target_hamper.status_history]
-                    st.dataframe(pd.DataFrame(history_rows), width="stretch", hide_index=True)
+                    with st.container(border=True):
+                        for h in target_hamper.status_history:
+                            st.markdown(f"⏱️ **{str(h.get('status')).upper()}** — *{h.get('timestamp')}*")
 
                 st.divider()
 

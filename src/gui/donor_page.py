@@ -120,56 +120,40 @@ def show_donor_page(manager, user):
             else:
                 st.info(f"No donations found with status '{status_filter}'.")
         else:
-            don_df = pd.DataFrame(filtered_donations)
-            edited_df = st.data_editor(
-                don_df,
-                column_config={
-                    "ID": st.column_config.NumberColumn("ID", width="small", disabled=True),
-                    "Station": st.column_config.TextColumn("Station", width="medium", disabled=True),
-                    "Status": st.column_config.TextColumn("Status", width="small", disabled=True),
-                    "Items Count": st.column_config.NumberColumn("Items Count", width="small", disabled=True),
-                    "Last Updated": st.column_config.TextColumn("Last Updated", width="medium", disabled=True),
-                    "Select": st.column_config.CheckboxColumn("Select", width="small")
-                },
-                hide_index=True,
-                width="stretch",
-                key="donor_history_table"
-            )
+            for item in filtered_donations:
+                don_id = item["ID"]
+                with st.container(border=True):
+                    head_col1, head_col2 = st.columns([3, 1])
+                    with head_col1:
+                        st.markdown(f"#### 🎁 Donation #{don_id}")
+                    with head_col2:
+                        st.markdown(f"**Status:** `{item['Status']}`")
 
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("Donation Detail", width="stretch"):
-                    selected_rows = edited_df[edited_df["Select"] == True]
-                    if len(selected_rows) == 0:
-                        st.error("Please select a donation to view its details.")
-                    elif len(selected_rows) > 1:
-                        st.error("Please select only one donation.")
-                    else:
-                        st.session_state.selected_donation_id = int(selected_rows.iloc[0]["ID"])
-                        st.session_state.donor_page = "Donation Detail"
-                        st.rerun()
+                    det_c1, det_c2, det_c3 = st.columns(3)
+                    with det_c1:
+                        st.write(f"📍 **Station:** {item['Station']}")
+                    with det_c2:
+                        st.write(f"📦 **Items:** {item['Items Count']} item(s)")
+                    with det_c3:
+                        st.write(f"🕒 **Updated:** {item['Last Updated']}")
 
-            with col2:
-                if st.button("Cancel / Delete Donation", width="stretch"):
-                    selected_rows = edited_df[edited_df["Select"] == True]
-                    if len(selected_rows) == 0:
-                        st.error("Please select a donation to cancel.")
-                    elif len(selected_rows) > 1:
-                        st.error("Please select only one donation.")
-                    else:
-                        don_id = int(selected_rows.iloc[0]["ID"])
-                        target_don = manager.find_donation_by_id(don_id)
-                        curr_st = target_don.status[0] if target_don and isinstance(target_don.status, list) and target_don.status else (getattr(target_don, "status", "") or "created")
-
-                        if str(curr_st).lower() != "created":
-                            st.error(f"Cannot cancel donation #{don_id} with status '{curr_st}'. Only donations in 'created' status can be cancelled before collection.")
+                    act_c1, act_c2 = st.columns(2)
+                    with act_c1:
+                        if st.button("🔍 View Details", key=f"btn_don_det_{don_id}", width="stretch"):
+                            st.session_state.selected_donation_id = don_id
+                            st.session_state.donor_page = "Donation Detail"
+                            st.rerun()
+                    with act_c2:
+                        if item["Status"].lower() == "created":
+                            if st.button("❌ Cancel / Delete", key=f"btn_don_del_{don_id}", width="stretch"):
+                                try:
+                                    manager.delete_donation(don_id, donor_id=user.id)
+                                    st.success(f"Donation #{don_id} has been cancelled and removed.")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Failed to cancel donation: {e}")
                         else:
-                            try:
-                                manager.delete_donation(don_id, donor_id=user.id)
-                                st.success(f"Donation #{don_id} has been cancelled and removed.")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Failed to cancel donation: {e}")
+                            st.caption("🔒 Status locked (collected / stocked)")
 
         st.divider()
         if st.button("Make a New Donation", width="stretch"):
@@ -244,18 +228,25 @@ def show_donor_page(manager, user):
                 if not target_donation.items:
                     st.info("No items recorded in this donation.")
                 else:
-                    items_rows = []
-                    for it in target_donation.items:
-                        if isinstance(it, dict):
-                            items_rows.append({"Item Name": it.get("name"), "Quantity": it.get("quantity")})
-                        else:
-                            items_rows.append({"Item Name": getattr(it, "name", str(it)), "Quantity": getattr(it, "quantity", 1)})
-                    st.dataframe(pd.DataFrame(items_rows), width="stretch", hide_index=True)
+                    with st.container(border=True):
+                        for it in target_donation.items:
+                            if isinstance(it, dict):
+                                it_name = it.get("name", "Item")
+                                it_qty = it.get("quantity", 1)
+                            else:
+                                it_name = getattr(it, "name", str(it))
+                                it_qty = getattr(it, "quantity", 1)
+                            c1, c2 = st.columns([3, 1])
+                            with c1:
+                                st.markdown(f"📦 **{it_name}**")
+                            with c2:
+                                st.markdown(f"**Quantity:** `{it_qty}`")
 
                 if getattr(target_donation, "status_history", None):
                     st.subheader("Status Timeline History")
-                    history_rows = [{"Status": h.get("status"), "Timestamp": h.get("timestamp")} for h in target_donation.status_history]
-                    st.dataframe(pd.DataFrame(history_rows), width="stretch", hide_index=True)
+                    with st.container(border=True):
+                        for h in target_donation.status_history:
+                            st.markdown(f"⏱️ **{str(h.get('status')).upper()}** — *{h.get('timestamp')}*")
 
                 st.divider()
 

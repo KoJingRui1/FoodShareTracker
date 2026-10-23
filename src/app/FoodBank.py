@@ -387,9 +387,26 @@ class FoodBank:
                     return user
         return None
 
-    def authenticate(self, email, password):
-        """Authenticates user credentials using bcrypt and returns (user, role_name) or None."""
-        user = self.find_user_by_email(email)
+    def find_user_by_email_or_id(self, identifier):
+        """Find a user by either email address or user ID."""
+        if identifier is None:
+            return None
+        target = str(identifier).strip()
+        if not target:
+            return None
+        if target.startswith("#"):
+            target = target[1:].strip()
+        # 1. Try finding by email
+        user = self.find_user_by_email(target)
+        if user is not None:
+            return user
+        # 2. Try finding by ID
+        return self.find_user_by_id(target)
+
+    def authenticate(self, identifier=None, password=None, email=None):
+        """Authenticates user credentials using email or ID with bcrypt and returns (user, role_name) or None."""
+        login_id = identifier if identifier is not None else email
+        user = self.find_user_by_email_or_id(login_id)
         if user is None or not password or not hasattr(user, "password"):
             return None
         if verify_password(password, user.password):
@@ -801,6 +818,24 @@ class FoodBank:
             if str(target_status).lower() == "collected":
                 fields["status"] = "created"
 
+        # Automatic transition if status is being set to 'stocked' from a non-stocked state
+        target_status = fields.get("status")
+        if target_status and str(target_status).lower() == "stocked" and str(curr_status).lower() != "stocked":
+            fields_without_status = {k: v for k, v in fields.items() if k != "status"}
+            for field, value in fields_without_status.items():
+                if field.startswith("_") or field == "id":
+                    raise ValueError(f"Cannot update protected field '{field}'.")
+                if not hasattr(donation, field): raise AttributeError(f"Donation has no field '{field}'.")
+                if field == "donor_id" and value not in (None, "", 0) and self.find_donor_by_id(value) is None:
+                    raise ValueError(f"Donor ID {value} does not exist.")
+                if field == "volunteer_id" and value not in (None, "", 0) and self.find_volunteer_by_id(value) is None:
+                    raise ValueError(f"Volunteer ID {value} does not exist.")
+                setattr(donation, field, value)
+            if str(curr_status).lower() in ("created", "assigned"):
+                self.collect_donation(donation.id, getattr(donation, "volunteer_id", None))
+            self.stock_donation(donation.id)
+            return donation
+
         for field, value in fields.items():
             if field.startswith("_") or field == "id":
                 raise ValueError(f"Cannot update protected field '{field}'.")
@@ -909,6 +944,40 @@ class FoodBank:
             if str(target_status).lower() == "assigned":
                 fields["status"] = "created"
 
+        # Automatic packing/unpacking transition handlers
+        target_status = fields.get("status")
+        if target_status:
+            # If changing to packed from created/assigned: deduct inventory via pack_food_hamper
+            if str(target_status).lower() == "packed" and str(curr_status).lower() in ("created", "assigned"):
+                fields_without_status = {k: v for k, v in fields.items() if k != "status"}
+                for field, value in fields_without_status.items():
+                    if field.startswith("_") or field == "id":
+                        raise ValueError(f"Cannot update protected field '{field}'.")
+                    if not hasattr(hamper, field): raise AttributeError(f"FoodHamper has no field '{field}'.")
+                    if field == "client_id" and value not in (None, "", 0) and self.find_client_by_id(value) is None:
+                        raise ValueError(f"Client ID {value} does not exist.")
+                    if field == "volunteer_id" and value not in (None, "", 0) and self.find_volunteer_by_id(value) is None:
+                        raise ValueError(f"Volunteer ID {value} does not exist.")
+                    setattr(hamper, field, value)
+                self.pack_food_hamper(hamper.id)
+                return hamper
+            # If unpacking from packed back to created/assigned: return stock
+            elif str(target_status).lower() in ("created", "assigned") and str(curr_status).lower() == "packed":
+                self.unpack_food_hamper(hamper.id)
+                fields_without_status = {k: v for k, v in fields.items() if k != "status"}
+                for field, value in fields_without_status.items():
+                    if field.startswith("_") or field == "id":
+                        raise ValueError(f"Cannot update protected field '{field}'.")
+                    if not hasattr(hamper, field): raise AttributeError(f"FoodHamper has no field '{field}'.")
+                    if field == "client_id" and value not in (None, "", 0) and self.find_client_by_id(value) is None:
+                        raise ValueError(f"Client ID {value} does not exist.")
+                    if field == "volunteer_id" and value not in (None, "", 0) and self.find_volunteer_by_id(value) is None:
+                        raise ValueError(f"Volunteer ID {value} does not exist.")
+                    setattr(hamper, field, value)
+                self._update_status(hamper, target_status)
+                self._save_data()
+                return hamper
+
         for field, value in fields.items():
             if field.startswith("_") or field == "id":
                 raise ValueError(f"Cannot update protected field '{field}'.")
@@ -984,9 +1053,9 @@ class FoodBank:
             raise ValueError(f"Food hamper ID {hamper_id} does not exist.")
         
         curr_status = hamper.status[0] if isinstance(hamper.status, list) and hamper.status else (hamper.status or "")
-        if str(curr_status).lower() not in ("assigned", "packed"):
+        if str(curr_status).lower() != "packed":
             raise ValueError(
-                f"Cannot deliver hamper {hamper_id} with status '{curr_status}'. Hamper must be 'packed' or 'assigned' before delivery."
+                f"Cannot deliver hamper {hamper_id} with status '{curr_status}'. Hamper must be 'packed' before delivery."
             )
 
         if volunteer_id is not None and hamper.volunteer_id is not None:

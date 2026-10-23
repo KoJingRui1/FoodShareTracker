@@ -1,193 +1,193 @@
 {
-    "address": "",
-    "description": "",
-    "collection_centers": [
-        {
-            "id": 1,
-            "name": "aas",
-            "address": "aaa"
-        }
-    ],
-    "applications": [],
-    "admins": [
-        {
-            "id": 1,
-            "name": "aa",
-            "password": "$2b$12$OgukU9g713EopXGd0s9apehd5VSpDjVPMkm/l3iMP5OZXnSVS9a/2",
-            "email": "aaa@aa.com",
-            "profile_image": "assets/default_avatar.png"
-        }
-    ],
-    "donors": [
-        {
-            "id": 2,
-            "name": "aaa",
-            "password": "$2b$12$3Jeg8Pj2BkT9O2D3Mh1a8eL65AuwUxQGgPJZf4Prp6p2Gnejclyxe",
-            "email": "aasd@as.com",
-            "profile_image": "assets/default_avatar.png",
-            "donation": [
-                1
-            ]
-        }
-    ],
-    "staffs": [],
-    "volunteers": [],
-    "clients": [],
-    "donations": [
-        {
-            "id": 1,
-            "donor_id": 2,
-            "description": "",
-            "status": "stocked",
-            "volunteer_id": null,
-            "station": null,
-            "items": [
-                {
-                    "name": "aa",
-                    "quantity": 1.0
-                }
-            ],
-            "flagged_issue": null,
-            "previous_status": null,
-            "issue_history": [],
-            "status_history": [
-                {
-                    "status": "created",
-                    "timestamp": "2026-10-23 01:45:27"
-                },
-                {
-                    "status": "collected",
-                    "timestamp": "2026-10-23 01:46:42"
-                },
-                {
-                    "status": "stocked",
-                    "timestamp": "2026-10-23 01:46:42"
-                }
-            ]
-        }
-    ],
-    "food_hampers": [
-        {
-            "id": 1,
-            "client_id": null,
-            "description": "",
-            "status": "delivered",
-            "volunteer_id": null,
-            "items": [
-                {
-                    "name": "aa",
-                    "quantity": 1.0
-                }
-            ],
-            "flagged_issue": null,
-            "previous_status": null,
-            "issue_history": [],
-            "status_history": [
-                {
-                    "status": "created",
-                    "timestamp": "2026-10-23 01:48:26"
-                },
-                {
-                    "status": "packed",
-                    "timestamp": "2026-10-23 01:48:35"
-                },
-                {
-                    "status": "created",
-                    "timestamp": "2026-10-23 01:48:39"
-                },
-                {
-                    "status": "packed",
-                    "timestamp": "2026-10-23 01:48:50"
-                },
-                {
-                    "status": "delivered",
-                    "timestamp": "2026-10-23 01:48:50"
-                }
-            ]
-        }
-    ],
-    "food_bank_data": {
-        "next_user_id": 3,
-        "next_donation_id": 2,
-        "next_food_hamper_id": 2,
-        "next_application_id": 1,
-        "address": "",
-        "description": "",
-        "collection_centers": [
-            {
-                "id": 1,
-                "name": "aas",
-                "address": "aaa"
-            }
-        ],
-        "next_station_id": 2
-    },
-    "inventory": {
-        "items": [
-            {
-                "id": 1,
-                "name": "aa",
-                "category": "aa",
-                "quantity": 1000.0,
-                "unit": "pcs",
-                "min_quantity": 5.0
-            }
-        ],
-        "stock_records": [
-            {
-                "id": 1,
-                "item_id": 1,
-                "change_type": "ADD_STOCK",
-                "quantity": 1000.0,
-                "previous_quantity": 0.0,
-                "new_quantity": 1000.0,
-                "timestamp": "2026-10-23 01:45:14",
-                "reason": "Manual Add Stock"
-            },
-            {
-                "id": 2,
-                "item_id": 1,
-                "change_type": "ADD_STOCK",
-                "quantity": 1.0,
-                "previous_quantity": 1000.0,
-                "new_quantity": 1001.0,
-                "timestamp": "2026-10-23 01:46:42",
-                "reason": "Stocked from Donation #1"
-            },
-            {
-                "id": 3,
-                "item_id": 1,
-                "change_type": "REMOVE_STOCK",
-                "quantity": 1.0,
-                "previous_quantity": 1001.0,
-                "new_quantity": 1000.0,
-                "timestamp": "2026-10-23 01:48:35",
-                "reason": "Packed for Hamper #1"
-            },
-            {
-                "id": 4,
-                "item_id": 1,
-                "change_type": "ADD_STOCK",
-                "quantity": 1.0,
-                "previous_quantity": 1000.0,
-                "new_quantity": 1001.0,
-                "timestamp": "2026-10-23 01:48:39",
-                "reason": "Unpacked from Hamper #1"
-            },
-            {
-                "id": 5,
-                "item_id": 1,
-                "change_type": "REMOVE_STOCK",
-                "quantity": 1.0,
-                "previous_quantity": 1001.0,
-                "new_quantity": 1000.0,
-                "timestamp": "2026-10-23 01:48:50",
-                "reason": "Packed for Hamper #1"
-            }
-        ],
-        "inventory_data": {
-            "next_item_id": 2,
-            "next_record_id": 6
-        }
+  "address": "",
+  "description": "A community-driven food banking initiative dedicated to zero food waste and zero hunger.",
+  "collection_centers": [
+    {
+      "id": 1,
+      "name": "aas",
+      "address": "aaa"
     }
+  ],
+  "applications": [],
+  "admins": [
+    {
+      "id": 1,
+      "name": "aa",
+      "password": "$2b$12$OgukU9g713EopXGd0s9apehd5VSpDjVPMkm/l3iMP5OZXnSVS9a/2",
+      "email": "aaa@aa.com",
+      "profile_image": "assets/default_avatar.png"
+    }
+  ],
+  "donors": [
+    {
+      "id": 2,
+      "name": "aaa",
+      "password": "$2b$12$3Jeg8Pj2BkT9O2D3Mh1a8eL65AuwUxQGgPJZf4Prp6p2Gnejclyxe",
+      "email": "aasd@as.com",
+      "profile_image": "assets/default_avatar.png",
+      "donation": [
+        1
+      ]
+    }
+  ],
+  "staffs": [],
+  "volunteers": [],
+  "clients": [],
+  "donations": [
+    {
+      "id": 1,
+      "donor_id": 2,
+      "description": "",
+      "status": "stocked",
+      "volunteer_id": null,
+      "station": null,
+      "items": [
+        {
+          "name": "aa",
+          "quantity": 1.0
+        }
+      ],
+      "flagged_issue": null,
+      "previous_status": null,
+      "issue_history": [],
+      "status_history": [
+        {
+          "status": "created",
+          "timestamp": "2026-10-23 01:45:27"
+        },
+        {
+          "status": "collected",
+          "timestamp": "2026-10-23 01:46:42"
+        },
+        {
+          "status": "stocked",
+          "timestamp": "2026-10-23 01:46:42"
+        }
+      ]
+    }
+  ],
+  "food_hampers": [
+    {
+      "id": 1,
+      "client_id": null,
+      "description": "",
+      "status": "delivered",
+      "volunteer_id": null,
+      "items": [
+        {
+          "name": "aa",
+          "quantity": 1.0
+        }
+      ],
+      "flagged_issue": null,
+      "previous_status": null,
+      "issue_history": [],
+      "status_history": [
+        {
+          "status": "created",
+          "timestamp": "2026-10-23 01:48:26"
+        },
+        {
+          "status": "packed",
+          "timestamp": "2026-10-23 01:48:35"
+        },
+        {
+          "status": "created",
+          "timestamp": "2026-10-23 01:48:39"
+        },
+        {
+          "status": "packed",
+          "timestamp": "2026-10-23 01:48:50"
+        },
+        {
+          "status": "delivered",
+          "timestamp": "2026-10-23 01:48:50"
+        }
+      ]
+    }
+  ],
+  "food_bank_data": {
+    "next_user_id": 3,
+    "next_donation_id": 2,
+    "next_food_hamper_id": 2,
+    "next_application_id": 1,
+    "address": "",
+    "description": "A community-driven food banking initiative dedicated to zero food waste and zero hunger.",
+    "collection_centers": [
+      {
+        "id": 1,
+        "name": "aas",
+        "address": "aaa"
+      }
+    ],
+    "next_station_id": 2
+  },
+  "inventory": {
+    "items": [
+      {
+        "id": 1,
+        "name": "aa",
+        "category": "aa",
+        "quantity": 1000.0,
+        "unit": "pcs",
+        "min_quantity": 5.0
+      }
+    ],
+    "stock_records": [
+      {
+        "id": 1,
+        "item_id": 1,
+        "change_type": "ADD_STOCK",
+        "quantity": 1000.0,
+        "previous_quantity": 0.0,
+        "new_quantity": 1000.0,
+        "timestamp": "2026-10-23 01:45:14",
+        "reason": "Manual Add Stock"
+      },
+      {
+        "id": 2,
+        "item_id": 1,
+        "change_type": "ADD_STOCK",
+        "quantity": 1.0,
+        "previous_quantity": 1000.0,
+        "new_quantity": 1001.0,
+        "timestamp": "2026-10-23 01:46:42",
+        "reason": "Stocked from Donation #1"
+      },
+      {
+        "id": 3,
+        "item_id": 1,
+        "change_type": "REMOVE_STOCK",
+        "quantity": 1.0,
+        "previous_quantity": 1001.0,
+        "new_quantity": 1000.0,
+        "timestamp": "2026-10-23 01:48:35",
+        "reason": "Packed for Hamper #1"
+      },
+      {
+        "id": 4,
+        "item_id": 1,
+        "change_type": "ADD_STOCK",
+        "quantity": 1.0,
+        "previous_quantity": 1000.0,
+        "new_quantity": 1001.0,
+        "timestamp": "2026-10-23 01:48:39",
+        "reason": "Unpacked from Hamper #1"
+      },
+      {
+        "id": 5,
+        "item_id": 1,
+        "change_type": "REMOVE_STOCK",
+        "quantity": 1.0,
+        "previous_quantity": 1001.0,
+        "new_quantity": 1000.0,
+        "timestamp": "2026-10-23 01:48:50",
+        "reason": "Packed for Hamper #1"
+      }
+    ],
+    "inventory_data": {
+      "next_item_id": 2,
+      "next_record_id": 6
+    }
+  }
 }

@@ -1,6 +1,6 @@
 import os
+import base64
 import streamlit as st
-import pandas as pd
 from src.app.utils import verify_password
 from src.app.admin import AdminUser
 from src.app.staff import StaffUser
@@ -11,14 +11,23 @@ from src.app.client import ClientUser
 
 def show_main_page(manager):
     """Render the public landing page with continuous vertical scroll and anchor navigation."""
+    # Load hero banner background
+    banner_path = os.path.join("assets", "hero_banner.png")
+    b64_bg = ""
+    if os.path.exists(banner_path):
+        with open(banner_path, "rb") as f:
+            b64_bg = base64.b64encode(f.read()).decode("utf-8")
+
+    bg_css = f'url("data:image/png;base64,{b64_bg}") center center / cover no-repeat' if b64_bg else 'linear-gradient(135deg, rgba(255,75,75,0.08) 0%, rgba(30,144,255,0.08) 100%)'
+
     # Enable smooth scrolling and sidebar navigation styling
     st.markdown(
-        """
+        f"""
         <style>
-        html {
+        html {{
             scroll-behavior: smooth;
-        }
-        .nav-anchor-link {
+        }}
+        .nav-anchor-link {{
             display: block;
             padding: 9px 14px;
             margin: 4px 0;
@@ -30,27 +39,42 @@ def show_main_page(manager):
             border: 1px solid rgba(128, 128, 128, 0.2);
             background: rgba(128, 128, 128, 0.05);
             transition: all 0.2s ease-in-out;
-        }
-        .nav-anchor-link:hover {
+        }}
+        .nav-anchor-link:hover {{
             background: rgba(255, 75, 75, 0.1);
             border-color: #ff4b4b;
             color: #ff4b4b !important;
             transform: translateX(3px);
-        }
-        .hero-container {
-            padding: 30px 20px;
-            border-radius: 12px;
-            background: linear-gradient(135deg, rgba(255,75,75,0.08) 0%, rgba(30,144,255,0.08) 100%);
-            border: 1px solid rgba(128, 128, 128, 0.15);
+        }}
+        .hero-container {{
+            padding: 55px 35px;
+            border-radius: 14px;
+            background: linear-gradient(rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.65)), {bg_css};
+            border: 1px solid rgba(255, 255, 255, 0.2);
             margin-bottom: 30px;
-        }
-        .stat-card {
+            box-shadow: 0 4px 18px rgba(0, 0, 0, 0.2);
+        }}
+        .hero-title {{
+            color: #ffffff !important;
+            font-size: 2.2rem !important;
+            font-weight: 700;
+            margin-bottom: 14px;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+        }}
+        .hero-subtitle {{
+            font-size: 1.15rem;
+            color: #f5f5f5 !important;
+            line-height: 1.6;
+            margin-bottom: 0px;
+            text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+        }}
+        .stat-card {{
             padding: 16px;
             border-radius: 10px;
             background: rgba(128, 128, 128, 0.06);
             border: 1px solid rgba(128, 128, 128, 0.15);
             text-align: center;
-        }
+        }}
         </style>
         """,
         unsafe_allow_html=True
@@ -59,15 +83,6 @@ def show_main_page(manager):
     # =========================================================
     # Sidebar Anchor Navigation
     # =========================================================
-
-    default_avatar = "assets/default_avatar.png"
-    if os.path.exists(default_avatar):
-        st.sidebar.image(default_avatar, width="stretch")
-
-    st.sidebar.markdown("## Foodshare Tracker")
-    st.sidebar.caption("Community Food Bank & Relief Network")
-    st.sidebar.divider()
-
     st.sidebar.markdown("**Navigation Menu**")
     st.sidebar.markdown(
         """
@@ -77,6 +92,7 @@ def show_main_page(manager):
         <a class="nav-anchor-link" href="#impact" target="_self">📊 Community Impact</a>
         <a class="nav-anchor-link" href="#volunteer" target="_self">🤝 Volunteer With Us</a>
         <a class="nav-anchor-link" href="#portal" target="_self">🔐 Portal Login & Register</a>
+        <a class="nav-anchor-link" href="#contacts" target="_self">👥 Team & Contacts</a>
         """,
         unsafe_allow_html=True
     )
@@ -87,16 +103,14 @@ def show_main_page(manager):
     # =========================================================
     # Section 1: Hero Banner (#hero)
     # =========================================================
-
     st.markdown('<div id="hero"></div>', unsafe_allow_html=True)
     st.markdown(
-        """
+        f"""
         <div class="hero-container">
-            <h1 style="margin-bottom: 8px;">Connecting Surplus Food to Families in Need</h1>
-            <p style="font-size: 1.15rem; color: gray; margin-bottom: 20px;">
-                Foodshare Tracker is a unified platform connecting food donors, community volunteers, 
-                and families seeking support to eliminate food waste and fight local food insecurity.
-            </p>
+            <div class="hero-title">FoodShare Tracker- A Human-Centred Food Bank Management system.</div>
+            <div class="hero-subtitle">
+                A lightweight, Python-based software solution designed to support community food banks, charities, and local support organisations in managing food donations, stock, client needs, volunteer tasks, and food distribution.
+            </div>
         </div>
         """,
         unsafe_allow_html=True
@@ -159,14 +173,10 @@ def show_main_page(manager):
         st.write(f"**Main Headquarters:** {addr}")
 
     with col_ab2:
-        st.markdown("#### How Our Network Works")
-        st.write(
-            "1. **Food Donors** register surplus edible groceries and drop them off at our neighborhood stations.\n"
-            "2. **Volunteers** pick up items and transport them safely to our central warehouse.\n"
-            "3. **Staff & Volunteers** inspect, catalogue, and carefully pack tailored nutrition hampers.\n"
-            "4. **Beneficiaries** receive dignified, confidential doorstep deliveries, accounting for all personal dietary and allergen requirements."
-        )
-
+        st.markdown("#### Credits")
+        st.write("Github Pages: https://github.com/KoJingRui1/FoodShareTracker")
+        st.write("Made by: Monash University Malaysia FIT1056 Team 16 Ko Jing Rui")        
+        st.write("Made in: 23/10/2026")
     st.write("")
     st.divider()
 
@@ -182,14 +192,16 @@ def show_main_page(manager):
     if not stations:
         st.info("No regional collection centers registered at the moment. Please contact our main headquarters.")
     else:
-        st_rows = []
-        for s in stations:
-            st_rows.append({
-                "Station ID": s.get("id"),
-                "Station Name": s.get("name"),
-                "Address & Location": s.get("address", "N/A")
-            })
-        st.dataframe(pd.DataFrame(st_rows), hide_index=True, width="stretch")
+        st_cols = st.columns(2)
+        for i, s in enumerate(stations):
+            with st_cols[i % 2]:
+                with st.container(border=True):
+                    s_name = s.get("name", "Station")
+                    s_id = s.get("id", "N/A")
+                    s_addr = s.get("address", "N/A")
+                    st.markdown(f"##### 📍 {s_name}")
+                    st.markdown(f"**Address:** {s_addr}")
+                    st.caption(f"Station ID: #{s_id}")
 
     st.write("")
     st.divider()
@@ -237,19 +249,22 @@ def show_main_page(manager):
         with c_v1:
             v_name = st.text_input("Full Name *", placeholder="Jane Doe")
             v_email = st.text_input("Email Address *", placeholder="jane@example.com")
+            v_desc = st.text_input("Availability / Vehicle Details", placeholder="e.g. Free Saturdays, possess standard hatchback car")
         with c_v2:
             v_pwd = st.text_input("Desired Password *", type="password", placeholder="At least 6 chars, letters & numbers")
-            v_desc = st.text_input("Availability / Vehicle Details", placeholder="e.g. Free Saturdays, possess standard hatchback car")
+            v_pwd_conf = st.text_input("Confirm Password *", type="password", placeholder="Re-enter desired password")
 
         v_submit = st.form_submit_button("Submit Volunteer Application", width="stretch")
 
         if v_submit:
-            if not v_name.strip() or not v_email.strip() or not v_pwd.strip():
-                st.error("Please fill in your name, email, and desired password.")
+            if not v_name.strip() or not v_email.strip() or not v_pwd.strip() or not v_pwd_conf.strip():
+                st.error("Please fill in your name, email, and password confirmation.")
             elif not manager.valid_name(v_name):
                 st.error("Invalid name. Please enter a valid name.")
             elif not manager.valid_password(v_pwd):
                 st.error("Password must be at least 6 characters and include letters and numbers.")
+            elif v_pwd != v_pwd_conf:
+                st.error("Passwords do not match. Please re-enter.")
             elif "@" not in v_email or "." not in v_email.split("@")[-1]:
                 st.error("Please provide a valid email address.")
             elif manager.find_user_by_email(v_email.strip()) is not None:
@@ -283,17 +298,17 @@ def show_main_page(manager):
     with tab_signin:
         st.markdown("##### Sign In to Your Account")
         with st.form("signin_form"):
-            login_email = st.text_input("Email Address")
+            login_identifier = st.text_input("Email Address or User ID", placeholder="Enter your email or ID (e.g. user@example.com or 1)")
             login_password = st.text_input("Password", type="password")
             submit_login = st.form_submit_button("Sign In", width="stretch")
 
             if submit_login:
-                if not login_email.strip() or not login_password:
-                    st.error("Please enter both email and password.")
+                if not login_identifier.strip() or not login_password:
+                    st.error("Please enter both Email/ID and password.")
                 else:
-                    found_user = manager.find_user_by_email(login_email.strip())
+                    found_user = manager.find_user_by_email_or_id(login_identifier.strip())
                     if found_user is None or not verify_password(login_password, found_user.password):
-                        st.error("Invalid email or password.")
+                        st.error("Invalid email/ID or password.")
                     else:
                         st.session_state.user = found_user
                         # Determine role for routing
@@ -328,8 +343,8 @@ def show_main_page(manager):
             submit_donor_reg = st.form_submit_button("Register as Donor", width="stretch")
 
             if submit_donor_reg:
-                if not d_name.strip() or not d_email.strip() or not d_pwd:
-                    st.error("All fields are required.")
+                if not d_name.strip() or not d_email.strip() or not d_pwd or not d_pwd_conf:
+                    st.error("All fields are required including password confirmation.")
                 elif not manager.valid_name(d_name):
                     st.error("Invalid name.")
                 elif not manager.valid_password(d_pwd):
@@ -369,8 +384,8 @@ def show_main_page(manager):
             submit_client_reg = st.form_submit_button("Register for Food Assistance", width="stretch")
 
             if submit_client_reg:
-                if not cl_name.strip() or not cl_email.strip() or not cl_pwd or not cl_address.strip():
-                    st.error("Please provide your name, email, password, and home address.")
+                if not cl_name.strip() or not cl_email.strip() or not cl_pwd or not cl_pwd_conf or not cl_address.strip():
+                    st.error("Please provide your name, email, password, password confirmation, and home address.")
                 elif not manager.valid_name(cl_name):
                     st.error("Invalid name.")
                 elif not manager.valid_password(cl_pwd):
@@ -401,6 +416,61 @@ def show_main_page(manager):
                     except Exception as e:
                         st.error(f"Registration failed: {e}")
 
+    # =========================================================
+    # Section 7: Team & Contact Information (#contacts)
+    # =========================================================
+
+    st.write("")
+    st.divider()
+    st.markdown('<div id="contacts"></div>', unsafe_allow_html=True)
+    st.subheader("👥 Leadership & Operations Team")
+    st.caption("Get in touch with our team members for program details, partnerships, and operational assistance.")
+
+    col_adm, col_stf = st.columns(2)
+
+    with col_adm:
+        st.markdown("#### 🛡️ Administrators")
+        admins = manager.admins
+        if not admins:
+            st.info("No administrators registered.")
+        else:
+            for a in admins:
+                with st.container(border=True):
+                    c1, c2 = st.columns([1, 3])
+                    with c1:
+                        img_path = getattr(a, "profile_image", "assets/default_avatar.png")
+                        if os.path.exists(img_path):
+                            st.image(img_path, width=70)
+                        else:
+                            st.markdown("🛡️")
+                    with c2:
+                        st.markdown(f"**{a.name}**")
+                        st.caption(f"Admin Staff")
+                        st.markdown(f"[{a.email}](mailto:{a.email})")
+
+    with col_stf:
+        st.markdown("#### 👷 Operational Staff")
+        staffs = manager.staffs
+        if not staffs:
+            st.info("No operational staff registered currently.")
+        else:
+            for s in staffs:
+                with st.container(border=True):
+                    c1, c2 = st.columns([1, 3])
+                    with c1:
+                        img_path = getattr(s, "profile_image", "assets/default_avatar.png")
+                        if os.path.exists(img_path):
+                            st.image(img_path, width=70)
+                        else:
+                            st.markdown("👷")
+                    with c2:
+                        st.markdown(f"**{s.name}**")
+                        st.caption(f"Food Bank Staff")
+                        st.markdown(f"[{s.email}](mailto:{s.email})")
+
 
 # Functional alias
 main_page = show_main_page
+
+
+

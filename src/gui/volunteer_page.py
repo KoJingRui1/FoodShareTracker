@@ -1,4 +1,5 @@
 import os
+import urllib.parse
 import streamlit as st
 import pandas as pd
 import datetime
@@ -88,6 +89,7 @@ def show_volunteer_page(manager, user):
         # Find active hampers assigned to this volunteer
         active_tasks = []
         user_id_str = str(user.id)
+        hq_addr = getattr(manager, "address", "") or "FoodBank Central Hub"
 
         for h in manager.food_hampers:
             curr_status = h.status[0] if isinstance(h.status, list) and h.status else (h.status or "created")
@@ -97,15 +99,19 @@ def show_volunteer_page(manager, user):
             if (is_assigned_to_me or is_in_work_list) and str(curr_status).lower() != "delivered":
                 client_obj = manager.find_client_by_id(h.client_id) if h.client_id else None
                 client_name = client_obj.name if client_obj else f"Client #{h.client_id}"
-                client_addr = getattr(client_obj, "address", "") or "No address provided"
+                client_addr = getattr(client_obj, "address", "") or "Address on file"
+                pickup_loc = f"FoodBank Central Hub ({hq_addr})"
+                dropoff_loc = f"{client_name} ({client_addr})"
+                route_flow = f"FoodBank Hub ➔ {client_name}"
 
                 active_tasks.append({
                     "Task Type": "Food Hamper Delivery",
                     "ID": h.id,
-                    "Destination / Target": f"{client_name} ({client_addr})",
+                    "Pickup Point": pickup_loc,
+                    "Dropoff Point": dropoff_loc,
+                    "Route Flow": route_flow,
                     "Status": str(curr_status).upper(),
                     "Items Count": len(getattr(h, "items", [])),
-                    "Select": False
                 })
 
         for d in manager.donations:
@@ -117,50 +123,57 @@ def show_volunteer_page(manager, user):
                 st_val = getattr(d, "station", None)
                 if st_val is not None:
                     st_obj = manager.find_station_by_id(st_val)
-                    loc = f"Station: {st_obj['name']}" if st_obj else f"Station ID: {st_val}"
+                    st_addr = st_obj.get("address", "") if st_obj else ""
+                    st_name = st_obj["name"] if st_obj else f"Station ID: {st_val}"
+                    pickup_loc = f"Station: {st_name} ({st_addr})" if st_addr else f"Station: {st_name}"
+                    route_flow = f"{st_name} ➔ FoodBank Hub"
                 else:
                     donor_obj = manager.find_donor_by_id(d.donor_id)
-                    loc = f"Donor: {donor_obj.name}" if donor_obj else f"Donor #{d.donor_id}"
+                    d_name = donor_obj.name if donor_obj else f"Donor #{d.donor_id}"
+                    pickup_loc = f"Donor: {d_name}"
+                    route_flow = f"{d_name} ➔ FoodBank Hub"
+
+                dropoff_loc = f"FoodBank Central Hub ({hq_addr})"
 
                 active_tasks.append({
                     "Task Type": "Donation Collection",
                     "ID": d.id,
-                    "Destination / Target": loc,
+                    "Pickup Point": pickup_loc,
+                    "Dropoff Point": dropoff_loc,
+                    "Route Flow": route_flow,
                     "Status": str(curr_status).upper(),
                     "Items Count": len(getattr(d, "items", [])),
-                    "Select": False
                 })
 
         if not active_tasks:
             st.info("You currently have no active jobs assigned. Go to 'Claim Jobs' to pick up available tasks!")
         else:
-            task_df = pd.DataFrame(active_tasks)
-            edited_tasks = st.data_editor(
-                task_df,
-                column_config={
-                    "Task Type": st.column_config.TextColumn("Task Type", width="medium", disabled=True),
-                    "ID": st.column_config.NumberColumn("ID", width="small", disabled=True),
-                    "Destination / Target": st.column_config.TextColumn("Destination / Target", width="large", disabled=True),
-                    "Status": st.column_config.TextColumn("Status", width="small", disabled=True),
-                    "Items Count": st.column_config.NumberColumn("Items Count", width="small", disabled=True),
-                    "Select": st.column_config.CheckboxColumn("Select", width="small")
-                },
-                hide_index=True,
-                width="stretch",
-                key="active_jobs_table"
-            )
+            for t in active_tasks:
+                task_type = t["Task Type"]
+                task_id = t["ID"]
+                icon = "📦" if task_type == "Donation Collection" else "🍲"
+                with st.container(border=True):
+                    h_col1, h_col2 = st.columns([3, 1])
+                    with h_col1:
+                        st.markdown(f"#### {icon} {task_type} #{task_id}")
+                    with h_col2:
+                        st.markdown(f"**Status:** `{t['Status']}`")
 
-            if st.button("View Task Details", width="stretch"):
-                selected_rows = edited_tasks[edited_tasks["Select"] == True]
-                if len(selected_rows) == 0:
-                    st.error("Please select a task to view details.")
-                elif len(selected_rows) > 1:
-                    st.error("Please select only one task.")
-                else:
-                    st.session_state.selected_task_type = str(selected_rows.iloc[0]["Task Type"])
-                    st.session_state.selected_task_id = int(selected_rows.iloc[0]["ID"])
-                    st.session_state.volunteer_page = "Task Detail"
-                    st.rerun()
+                    st.info(f"🧭 **Delivery Direction:** {t['Route Flow']}\n\n*Pickup:* {t['Pickup Point']} ➡️ *Drop-off:* {t['Dropoff Point']}")
+
+                    d_col1, d_col2 = st.columns(2)
+                    with d_col1:
+                        st.write(f"🚩 **From (Pickup):** {t['Pickup Point']}")
+                        st.write(f"🏁 **To (Delivery):** {t['Dropoff Point']}")
+                    with d_col2:
+                        st.write(f"📦 **Items:** {t['Items Count']} item(s)")
+                        st.write(f"🗺️ **Transit Flow:** `{t['Route Flow']}`")
+
+                    if st.button("🔍 View Details & Navigation", key=f"btn_act_task_{task_type}_{task_id}", width="stretch"):
+                        st.session_state.selected_task_type = task_type
+                        st.session_state.selected_task_id = task_id
+                        st.session_state.volunteer_page = "Task Detail"
+                        st.rerun()
 
         st.divider()
         if st.button("Find & Claim New Jobs", width="stretch"):
@@ -225,6 +238,26 @@ def show_volunteer_page(manager, user):
 
                     st.divider()
 
+                    st.subheader("🧭 Delivery Route & Navigation Direction")
+                    hq_addr = getattr(manager, "address", "") or "FoodBank Central Warehouse (Main Hub)"
+                    with st.container(border=True):
+                        r_c1, r_arr, r_c2 = st.columns([5, 1, 5])
+                        with r_c1:
+                            st.markdown("##### 1️⃣ Pickup Point (Origin)")
+                            st.markdown("🏢 **FoodBank Central Hub**")
+                            st.caption(f"📍 {hq_addr}")
+                            map_hq = f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(hq_addr)}"
+                            st.markdown(f"[🗺️ Open in Google Maps]({map_hq})")
+                        with r_arr:
+                            st.markdown("<h2 style='text-align:center;'>➡️</h2>", unsafe_allow_html=True)
+                        with r_c2:
+                            st.markdown("##### 2️⃣ Drop-off Destination (Recipient)")
+                            st.markdown(f"🏠 **Client:** {client_name}")
+                            st.caption(f"📍 {client_addr}")
+                            map_dest = f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(client_addr)}"
+                            st.markdown(f"[🗺️ Open in Google Maps]({map_dest})")
+
+                    st.write("")
                     col_left, col_right = st.columns(2)
                     with col_left:
                         st.subheader("Recipient Client & Address")
@@ -243,18 +276,25 @@ def show_volunteer_page(manager, user):
                     if not target_hamper.items:
                         st.info("No items listed in this hamper.")
                     else:
-                        items_rows = []
-                        for it in target_hamper.items:
-                            if isinstance(it, dict):
-                                items_rows.append({"Item Name": it.get("name"), "Quantity": it.get("quantity")})
-                            else:
-                                items_rows.append({"Item Name": getattr(it, "name", str(it)), "Quantity": getattr(it, "quantity", 1)})
-                        st.dataframe(pd.DataFrame(items_rows), width="stretch", hide_index=True)
+                        with st.container(border=True):
+                            for it in target_hamper.items:
+                                if isinstance(it, dict):
+                                    it_name = it.get("name", "Item")
+                                    it_qty = it.get("quantity", 1)
+                                else:
+                                    it_name = getattr(it, "name", str(it))
+                                    it_qty = getattr(it, "quantity", 1)
+                                c1, c2 = st.columns([3, 1])
+                                with c1:
+                                    st.markdown(f"🍲 **{it_name}**")
+                                with c2:
+                                    st.markdown(f"**Quantity:** `{it_qty}`")
 
                     if getattr(target_hamper, "status_history", None):
                         st.subheader("Status Timeline History")
-                        history_rows = [{"Status": h.get("status"), "Timestamp": h.get("timestamp")} for h in target_hamper.status_history]
-                        st.dataframe(pd.DataFrame(history_rows), width="stretch", hide_index=True)
+                        with st.container(border=True):
+                            for h in target_hamper.status_history:
+                                st.markdown(f"⏱️ **{str(h.get('status')).upper()}** — *{h.get('timestamp')}*")
 
                     st.divider()
 
@@ -318,6 +358,27 @@ def show_volunteer_page(manager, user):
 
                     st.divider()
 
+                    st.subheader("🧭 Collection Route & Navigation Direction")
+                    hq_addr = getattr(manager, "address", "") or "FoodBank Central Warehouse (Main Hub)"
+                    st_addr = st_obj.get("address", "") if st_val is not None and st_obj else ""
+                    with st.container(border=True):
+                        r_c1, r_arr, r_c2 = st.columns([5, 1, 5])
+                        with r_c1:
+                            st.markdown("##### 1️⃣ Pickup Point (Origin)")
+                            st.markdown(f"📍 **{station_display}**")
+                            pickup_query = st_addr if st_addr else (donor_name if donor_obj else station_display)
+                            map_pickup = f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(pickup_query)}"
+                            st.markdown(f"[🗺️ Open in Google Maps]({map_pickup})")
+                        with r_arr:
+                            st.markdown("<h2 style='text-align:center;'>➡️</h2>", unsafe_allow_html=True)
+                        with r_c2:
+                            st.markdown("##### 2️⃣ Drop-off Destination (FoodBank)")
+                            st.markdown("🏢 **FoodBank Central Hub**")
+                            st.caption(f"📍 {hq_addr}")
+                            map_hq = f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(hq_addr)}"
+                            st.markdown(f"[🗺️ Open in Google Maps]({map_hq})")
+
+                    st.write("")
                     col_left, col_right = st.columns(2)
                     with col_left:
                         st.subheader("Donor & Dropoff Location")
@@ -336,18 +397,25 @@ def show_volunteer_page(manager, user):
                     if not target_donation.items:
                         st.info("No items listed in this donation.")
                     else:
-                        items_rows = []
-                        for it in target_donation.items:
-                            if isinstance(it, dict):
-                                items_rows.append({"Item Name": it.get("name"), "Quantity": it.get("quantity")})
-                            else:
-                                items_rows.append({"Item Name": getattr(it, "name", str(it)), "Quantity": getattr(it, "quantity", 1)})
-                        st.dataframe(pd.DataFrame(items_rows), width="stretch", hide_index=True)
+                        with st.container(border=True):
+                            for it in target_donation.items:
+                                if isinstance(it, dict):
+                                    it_name = it.get("name", "Item")
+                                    it_qty = it.get("quantity", 1)
+                                else:
+                                    it_name = getattr(it, "name", str(it))
+                                    it_qty = getattr(it, "quantity", 1)
+                                c1, c2 = st.columns([3, 1])
+                                with c1:
+                                    st.markdown(f"📦 **{it_name}**")
+                                with c2:
+                                    st.markdown(f"**Quantity:** `{it_qty}`")
 
                     if getattr(target_donation, "status_history", None):
                         st.subheader("Status Timeline History")
-                        history_rows = [{"Status": h.get("status"), "Timestamp": h.get("timestamp")} for h in target_donation.status_history]
-                        st.dataframe(pd.DataFrame(history_rows), width="stretch", hide_index=True)
+                        with st.container(border=True):
+                            for h in target_donation.status_history:
+                                st.markdown(f"⏱️ **{str(h.get('status')).upper()}** — *{h.get('timestamp')}*")
 
                     st.divider()
 
@@ -387,6 +455,7 @@ def show_volunteer_page(manager, user):
         task_type_filter = st.selectbox("Filter Task Type", ["All", "Food Hamper Delivery", "Donation Collection"])
 
         claimable_tasks = []
+        hq_addr = getattr(manager, "address", "") or "FoodBank Central Hub"
 
         # Claimable Hampers
         if task_type_filter in ("All", "Food Hamper Delivery"):
@@ -395,15 +464,19 @@ def show_volunteer_page(manager, user):
                 curr_status = h.status[0] if isinstance(h.status, list) and h.status else (h.status or "created")
                 client_obj = manager.find_client_by_id(h.client_id) if h.client_id else None
                 client_name = client_obj.name if client_obj else f"Client #{h.client_id}"
-                client_addr = getattr(client_obj, "address", "") or "No address provided"
+                client_addr = getattr(client_obj, "address", "") or "Address on file"
+                pickup_loc = f"FoodBank Central Hub ({hq_addr})"
+                dropoff_loc = f"{client_name} ({client_addr})"
+                route_flow = f"FoodBank Hub ➔ {client_name}"
 
                 claimable_tasks.append({
                     "Task Type": "Food Hamper Delivery",
                     "ID": h.id,
-                    "Destination / Target": f"{client_name} ({client_addr})",
+                    "Pickup Point": pickup_loc,
+                    "Dropoff Point": dropoff_loc,
+                    "Route Flow": route_flow,
                     "Status": str(curr_status).upper(),
                     "Items Count": len(getattr(h, "items", [])),
-                    "Select": False
                 })
 
         # Claimable Donations
@@ -414,59 +487,64 @@ def show_volunteer_page(manager, user):
                 st_val = getattr(d, "station", None)
                 if st_val is not None:
                     st_obj = manager.find_station_by_id(st_val)
-                    loc = f"Station: {st_obj['name']}" if st_obj else f"Station ID: {st_val}"
+                    st_addr = st_obj.get("address", "") if st_obj else ""
+                    st_name = st_obj["name"] if st_obj else f"Station ID: {st_val}"
+                    pickup_loc = f"Station: {st_name} ({st_addr})" if st_addr else f"Station: {st_name}"
+                    route_flow = f"{st_name} ➔ FoodBank Hub"
                 else:
                     donor_obj = manager.find_donor_by_id(d.donor_id)
-                    loc = f"Donor: {donor_obj.name}" if donor_obj else f"Donor #{d.donor_id}"
+                    d_name = donor_obj.name if donor_obj else f"Donor #{d.donor_id}"
+                    pickup_loc = f"Donor: {d_name}"
+                    route_flow = f"{d_name} ➔ FoodBank Hub"
+
+                dropoff_loc = f"FoodBank Central Hub ({hq_addr})"
 
                 claimable_tasks.append({
                     "Task Type": "Donation Collection",
                     "ID": d.id,
-                    "Destination / Target": loc,
+                    "Pickup Point": pickup_loc,
+                    "Dropoff Point": dropoff_loc,
+                    "Route Flow": route_flow,
                     "Status": str(curr_status).upper(),
                     "Items Count": len(getattr(d, "items", [])),
-                    "Select": False
                 })
 
         if not claimable_tasks:
             st.info("No open tasks currently available to claim. Please check back later!")
         else:
-            claim_df = pd.DataFrame(claimable_tasks)
-            edited_claim = st.data_editor(
-                claim_df,
-                column_config={
-                    "Task Type": st.column_config.TextColumn("Task Type", width="medium", disabled=True),
-                    "ID": st.column_config.NumberColumn("ID", width="small", disabled=True),
-                    "Destination / Target": st.column_config.TextColumn("Destination / Target", width="large", disabled=True),
-                    "Status": st.column_config.TextColumn("Status", width="small", disabled=True),
-                    "Items Count": st.column_config.NumberColumn("Items Count", width="small", disabled=True),
-                    "Select": st.column_config.CheckboxColumn("Select", width="small")
-                },
-                hide_index=True,
-                width="stretch",
-                key="claim_jobs_table"
-            )
+            for task in claimable_tasks:
+                chosen_type = task["Task Type"]
+                chosen_id = task["ID"]
+                icon = "📦" if chosen_type == "Donation Collection" else "🍲"
+                with st.container(border=True):
+                    h_col1, h_col2 = st.columns([3, 1])
+                    with h_col1:
+                        st.markdown(f"#### {icon} {chosen_type} #{chosen_id}")
+                    with h_col2:
+                        st.markdown(f"**Status:** `{task['Status']}`")
 
-            if st.button("Claim Selected Task", width="stretch"):
-                selected_rows = edited_claim[edited_claim["Select"] == True]
-                if len(selected_rows) == 0:
-                    st.error("Please select a task to claim.")
-                elif len(selected_rows) > 1:
-                    st.error("Please select only one task at a time.")
-                else:
-                    chosen_type = str(selected_rows.iloc[0]["Task Type"])
-                    chosen_id = int(selected_rows.iloc[0]["ID"])
-                    try:
-                        if chosen_type == "Food Hamper Delivery":
-                            manager.claim_hamper(user.id, chosen_id)
-                        else:
-                            manager.claim_donation(user.id, chosen_id)
+                    st.info(f"🧭 **Route Direction:** {task['Route Flow']}\n\n*Pickup:* {task['Pickup Point']} ➡️ *Drop-off:* {task['Dropoff Point']}")
 
-                        st.session_state.volunteer_page = "Active Jobs"
-                        st.success(f"{chosen_type} #{chosen_id} claimed successfully! Added to your Active Jobs.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Cannot claim task: {e}")
+                    d_col1, d_col2 = st.columns(2)
+                    with d_col1:
+                        st.write(f"🚩 **From (Pickup):** {task['Pickup Point']}")
+                        st.write(f"🏁 **To (Delivery):** {task['Dropoff Point']}")
+                    with d_col2:
+                        st.write(f"📦 **Items Count:** {task['Items Count']} item(s)")
+                        st.write(f"🗺️ **Transit Route:** `{task['Route Flow']}`")
+
+                    if st.button(f"⚡ Claim {chosen_type} #{chosen_id}", key=f"btn_claim_{chosen_type}_{chosen_id}", type="primary", width="stretch"):
+                        try:
+                            if chosen_type == "Food Hamper Delivery":
+                                manager.claim_hamper(user.id, chosen_id)
+                            else:
+                                manager.claim_donation(user.id, chosen_id)
+
+                            st.session_state.volunteer_page = "Active Jobs"
+                            st.success(f"{chosen_type} #{chosen_id} claimed successfully! Added to your Active Jobs.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Cannot claim task: {e}")
 
     # =========================================================
     # Completed Jobs (Read-only historical view)
@@ -494,6 +572,7 @@ def show_volunteer_page(manager, user):
                     "Task Type": "Food Hamper Delivery",
                     "Task ID": h.id,
                     "Recipient / Station": client_name,
+                    "Route Flow": f"FoodBank Hub ➔ {client_name}",
                     "Items Count": len(getattr(h, "items", [])),
                     "Status": "DELIVERED",
                     "Completed At": completed_time
@@ -510,9 +589,11 @@ def show_volunteer_page(manager, user):
                 if st_val is not None:
                     st_obj = manager.find_station_by_id(st_val)
                     loc = f"Station: {st_obj['name']}" if st_obj else f"Station ID: {st_val}"
+                    st_name = st_obj["name"] if st_obj else f"Station #{st_val}"
                 else:
                     donor_obj = manager.find_donor_by_id(d.donor_id)
                     loc = f"Donor: {donor_obj.name}" if donor_obj else f"Donor #{d.donor_id}"
+                    st_name = donor_obj.name if donor_obj else f"Donor #{d.donor_id}"
 
                 completed_time = d.status_history[-1]["timestamp"] if getattr(d, "status_history", None) else "N/A"
 
@@ -520,6 +601,7 @@ def show_volunteer_page(manager, user):
                     "Task Type": "Donation Collection",
                     "Task ID": d.id,
                     "Recipient / Station": loc,
+                    "Route Flow": f"{st_name} ➔ FoodBank Hub",
                     "Items Count": len(getattr(d, "items", [])),
                     "Status": str(curr_status).upper(),
                     "Completed At": completed_time
@@ -528,12 +610,26 @@ def show_volunteer_page(manager, user):
         if not completed_tasks:
             st.info("You have not completed any tasks yet. Keep up the good work!")
         else:
-            comp_df = pd.DataFrame(completed_tasks)
-            st.dataframe(
-                comp_df,
-                hide_index=True,
-                width="stretch"
-            )
+            for task in completed_tasks:
+                task_type = task["Task Type"]
+                task_id = task["Task ID"]
+                icon = "📦" if task_type == "Donation Collection" else "🍲"
+                with st.container(border=True):
+                    h_col1, h_col2 = st.columns([3, 1])
+                    with h_col1:
+                        st.markdown(f"#### {icon} {task_type} #{task_id}")
+                    with h_col2:
+                        st.markdown(f"**Status:** `{task['Status']}`")
+
+                    st.caption(f"🧭 **Completed Route Direction:** `{task.get('Route Flow', 'N/A')}`")
+
+                    d_col1, d_col2, d_col3 = st.columns(3)
+                    with d_col1:
+                        st.write(f"📍 **Target / Location:** {task['Recipient / Station']}")
+                    with d_col2:
+                        st.write(f"📦 **Items:** {task['Items Count']} item(s)")
+                    with d_col3:
+                        st.write(f"🕒 **Completed At:** {task['Completed At']}")
 
     # =========================================================
     # Volunteer Profile
