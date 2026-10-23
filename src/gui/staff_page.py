@@ -773,7 +773,7 @@ def show_staff_page(manager, user):
                 station_filter_opts = ["All"] + [f"ID: {s.get('id')} - {s.get('name')}" for s in all_stations]
                 search_term = st.selectbox("Select Station", station_filter_opts, key="donation_station_search")
             elif term == "STATUS":
-                search_term = st.selectbox("Please choose the status.", ["created", "assigned", "collected", "stocked"], key="donation_status_search")
+                search_term = st.selectbox("Please choose the status.", ["created", "assigned", "flagged", "collected", "stocked"], key="donation_status_search")
             else:
                 search_term = ""
 
@@ -1037,7 +1037,9 @@ def show_staff_page(manager, user):
                     last_updated = target_donation.status_history[-1]["timestamp"] if getattr(target_donation, "status_history", None) else "N/A"
                     st.write(f"**Last Status Updated:** {last_updated}")
                     if getattr(target_donation, "flagged_issue", None):
-                        st.warning(f"Flagged Issue: {target_donation.flagged_issue.get('issue')}")
+                        fi = target_donation.flagged_issue
+                        vol_info = f"Volunteer #{fi.get('volunteer_id')}" if fi.get('volunteer_id') else "Volunteer"
+                        st.warning(f"⚠️ **Flagged Issue:** {fi.get('issue')} (Reported by {vol_info} at {fi.get('reported_at', 'N/A')})")
 
                 st.subheader("Donated Items Breakdown")
                 if not target_donation.items:
@@ -1057,6 +1059,34 @@ def show_staff_page(manager, user):
                     st.dataframe(pd.DataFrame(history_rows), width="stretch", hide_index=True)
 
                 st.divider()
+
+                # Flagged Issue Resolution
+                if curr_status.lower() == "flagged" or getattr(target_donation, "flagged_issue", None):
+                    st.subheader("🛠️ Resolve Flagged Issue")
+                    st.info("Investigate and resolve the reported issue. Resolving will restore the donation to its previous active status.")
+                    res_notes = st.text_input("Resolution Notes", placeholder="e.g. Contacted volunteer; items collected successfully", key=f"res_notes_don_{target_donation.id}")
+                    prev_st = getattr(target_donation, "previous_status", None) or "created"
+                    st.caption(f"Status will be restored to: `{str(prev_st).upper()}`")
+                    col_res1, col_res2 = st.columns(2)
+                    with col_res1:
+                        if st.button("Mark Issue as Resolved", key=f"btn_res_don_{target_donation.id}", type="primary", width="stretch"):
+                            try:
+                                manager.resolve_donation_issue(target_donation.id, resolution_notes=res_notes.strip(), resolved_by=user.id)
+                                st.success(f"Issue on Donation #{target_donation.id} has been resolved! Status restored to '{prev_st}'.")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Failed to resolve issue: {e}")
+                    with col_res2:
+                        if st.button("Delete Flagged Donation", key=f"btn_del_flag_don_{target_donation.id}", width="stretch"):
+                            try:
+                                manager.delete_donation(target_donation.id)
+                                st.success(f"Flagged donation #{target_donation.id} has been permanently deleted.")
+                                del st.session_state.selected_donation_id
+                                st.session_state.staff_page = "Donations"
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Failed to delete flagged donation: {e}")
+                    st.write("")
 
                 # Staff Collection & Stock Confirmation
                 if curr_status.lower() in ("created", "assigned"):
@@ -1167,6 +1197,8 @@ def show_staff_page(manager, user):
 
                 # Status selector
                 status_choices = ["created", "assigned", "collected", "stocked"]
+                if curr_status.lower() == "flagged" and "flagged" not in status_choices:
+                    status_choices.append("flagged")
                 new_status = st.selectbox(
                     "Status",
                     status_choices,
@@ -1289,7 +1321,7 @@ def show_staff_page(manager, user):
             elif term == "VOLUNTEER NAME":
                 search_term = st.text_input("Please enter Volunteer Name.", key="hamper_vol_search")
             elif term == "STATUS":
-                search_term = st.selectbox("Please choose the status.", ["created", "assigned", "packed", "delivered"], key="hamper_status_search")
+                search_term = st.selectbox("Please choose the status.", ["created", "assigned", "packed", "flagged", "delivered"], key="hamper_status_search")
             else:
                 search_term = ""
 
@@ -1547,7 +1579,9 @@ def show_staff_page(manager, user):
                     last_updated = target_hamper.status_history[-1]["timestamp"] if getattr(target_hamper, "status_history", None) else "N/A"
                     st.write(f"**Last Status Updated:** {last_updated}")
                     if getattr(target_hamper, "flagged_issue", None):
-                        st.warning(f"Flagged Issue: {target_hamper.flagged_issue.get('issue')}")
+                        fi = target_hamper.flagged_issue
+                        vol_info = f"Volunteer #{fi.get('volunteer_id')}" if fi.get('volunteer_id') else "Volunteer"
+                        st.warning(f"⚠️ **Flagged Issue:** {fi.get('issue')} (Reported by {vol_info} at {fi.get('reported_at', 'N/A')})")
 
                 st.subheader("Packed Food Items Breakdown")
                 if not target_hamper.items:
@@ -1567,6 +1601,34 @@ def show_staff_page(manager, user):
                     st.dataframe(pd.DataFrame(history_rows), width="stretch", hide_index=True)
 
                 st.divider()
+
+                # Flagged Issue Resolution
+                if curr_status.lower() == "flagged" or getattr(target_hamper, "flagged_issue", None):
+                    st.subheader("🛠️ Resolve Flagged Issue")
+                    st.info("Investigate and resolve the reported issue. Resolving will restore the food hamper to its previous active status.")
+                    res_notes = st.text_input("Resolution Notes", placeholder="e.g. Verified recipient address and dispatched delivery", key=f"res_notes_hmp_{target_hamper.id}")
+                    prev_st = getattr(target_hamper, "previous_status", None) or "created"
+                    st.caption(f"Status will be restored to: `{str(prev_st).upper()}`")
+                    col_res1, col_res2 = st.columns(2)
+                    with col_res1:
+                        if st.button("Mark Issue as Resolved", key=f"btn_res_hmp_{target_hamper.id}", type="primary", width="stretch"):
+                            try:
+                                manager.resolve_hamper_issue(target_hamper.id, resolution_notes=res_notes.strip(), resolved_by=user.id)
+                                st.success(f"Issue on Food Hamper #{target_hamper.id} has been resolved! Status restored to '{prev_st}'.")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Failed to resolve issue: {e}")
+                    with col_res2:
+                        if st.button("Delete Flagged Hamper (Auto-Unpack)", key=f"btn_del_flag_hmp_{target_hamper.id}", width="stretch"):
+                            try:
+                                manager.delete_food_hamper(target_hamper.id)
+                                st.success(f"Flagged hamper #{target_hamper.id} has been deleted and items returned to inventory.")
+                                del st.session_state.selected_hamper_id
+                                st.session_state.staff_page = "Food Hampers"
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Failed to delete flagged hamper: {e}")
+                    st.write("")
                 # Food Hamper Status Info
                 if curr_status.lower() == "delivered":
                     st.success("This food hamper has been successfully delivered to the recipient.")
@@ -1656,6 +1718,8 @@ def show_staff_page(manager, user):
 
                 # Status
                 status_choices = ["created", "assigned", "packed", "delivered"]
+                if curr_status.lower() == "flagged" and "flagged" not in status_choices:
+                    status_choices.append("flagged")
                 new_status = st.selectbox(
                     "Status",
                     status_choices,
@@ -1740,7 +1804,7 @@ def show_staff_page(manager, user):
                                     manager.pack_food_hamper(target_hamper.id)
                                 manager.deliver_food_hamper(target_hamper.id)
                             # If staff unpacks back from packed to created/assigned, return items
-                            elif curr_status.lower() == "packed" and new_status.lower() in ("created", "assigned"):
+                            elif (curr_status.lower() == "packed" or (curr_status.lower() == "flagged" and getattr(target_hamper, "previous_status", None) == "packed")) and new_status.lower() in ("created", "assigned"):
                                 manager.unpack_food_hamper(target_hamper.id)
                                 manager.update_food_hamper(
                                     target_hamper.id,

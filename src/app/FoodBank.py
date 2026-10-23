@@ -853,7 +853,7 @@ class FoodBank:
         return donation
 
     def remove_donation(self, donation_id, donor_id=None):
-        """Deletes donation only if status is 'created'; verifies donor ownership if donor_id provided; raises ValueError if 'collected'."""
+        """Deletes donation if status is 'created' or 'flagged'; verifies donor ownership if donor_id provided; raises ValueError otherwise."""
         donation = self.find_donation_by_id(donation_id)
         if donation is None: return False
 
@@ -861,8 +861,10 @@ class FoodBank:
             raise PermissionError(f"Donor {donor_id} is not authorized to delete donation {donation_id}.")
         
         curr_status = donation.status[0] if isinstance(donation.status, list) and donation.status else (donation.status or "")
-        if str(curr_status).lower() != "created":
-            raise ValueError(f"Cannot delete donation {donation_id} with status '{curr_status}'. Only 'created' donations can be deleted.")
+        curr_lower = str(curr_status).lower()
+        allowed_statuses = ("created",) if donor_id is not None else ("created", "flagged")
+        if curr_lower not in allowed_statuses:
+            raise ValueError(f"Cannot delete donation {donation_id} with status '{curr_status}'. Only 'created' donations can be deleted (or 'flagged' for staff).")
         
         self.donations.remove(donation)
         for donor in self.donors:
@@ -995,20 +997,57 @@ class FoodBank:
         return hamper
 
     def remove_food_hamper(self, hamper_id):
-        """Deletes food hamper only if status is 'created'; raises ValueError if not 'created'."""
+        """Deletes food hamper if status is 'created' or 'flagged'; automatically unpacks and returns items to inventory if needed."""
         hamper = self.find_food_hamper_by_id(hamper_id)
         if hamper is None:
             return False
         
         curr_status = hamper.status[0] if isinstance(hamper.status, list) and hamper.status else (hamper.status or "")
-        if str(curr_status).lower() != "created":
-            raise ValueError(f"Cannot delete food hamper {hamper_id} with status '{curr_status}'. Only 'created' food hampers can be deleted.")
+        curr_lower = str(curr_status).lower()
+        if curr_lower not in ("created", "flagged"):
+            raise ValueError(f"Cannot delete food hamper {hamper_id} with status '{curr_status}'. Only 'created' or 'flagged' food hampers can be deleted.")
         
+        # Deleting a food hamper equals unpack: return items to inventory if packed
+        was_packed = (curr_lower == "packed" or str(getattr(hamper, "previous_status", "")).lower() == "packed")
+        if not was_packed and getattr(hamper, "status_history", None):
+            for h_record in hamper.status_history:
+                if str(h_record.get("status", "")).lower() == "packed":
+                    was_packed = True
+                    break
+
+        if was_packed:
+            items_to_return = hamper.items
+            if isinstance(items_to_return, dict):
+                items_to_return = [{"name": k, "quantity": v} for k, v in items_to_return.items()]
+
+            for it in (items_to_return or []):
+                if isinstance(it, dict):
+                    item_id = it.get("item_id") or it.get("id")
+                    item_name = it.get("name")
+                    qty = float(it.get("quantity", 1))
+                elif isinstance(it, str):
+                    item_id = None
+                    item_name = it
+                    qty = 1.0
+                else:
+                    item_id = getattr(it, "id", None)
+                    item_name = getattr(it, "name", None)
+                    qty = float(getattr(it, "quantity", 1))
+
+                inv_item = None
+                if item_id is not None:
+                    inv_item = self.inventory.find_item_by_id(item_id)
+                elif item_name:
+                    inv_item = self.inventory.find_item_by_name(item_name)
+
+                if inv_item:
+                    self.add_stock(inv_item.id, qty, reason=f"Unpacked and Deleted Hamper #{hamper_id}")
+
         self.food_hampers.remove(hamper)
         for client in self.clients:
             if hasattr(client, "receive"):
                 client.receive = [item for item in client.receive if str(item) != str(hamper_id)]
-        logging.info(f"Removed food hamper ID {hamper_id}")
+        logging.info(f"Removed food hamper ID {hamper_id} (Auto-unpacked: {was_packed})")
         self._save_data()
         return True
 
