@@ -249,22 +249,25 @@ def show_main_page(manager):
         with c_v1:
             v_name = st.text_input("Full Name *", placeholder="Jane Doe")
             v_email = st.text_input("Email Address *", placeholder="jane@example.com")
-            v_desc = st.text_input("Availability / Vehicle Details", placeholder="e.g. Free Saturdays, possess standard hatchback car")
+            v_email_conf = st.text_input("Confirm Email Address *", placeholder="Re-enter your email")
         with c_v2:
             v_pwd = st.text_input("Desired Password *", type="password", placeholder="At least 6 chars, letters & numbers")
             v_pwd_conf = st.text_input("Confirm Password *", type="password", placeholder="Re-enter desired password")
+            v_desc = st.text_input("Availability / Vehicle Details", placeholder="e.g. Free Saturdays, possess standard hatchback car")
 
         v_submit = st.form_submit_button("Submit Volunteer Application", width="stretch")
 
         if v_submit:
-            if not v_name.strip() or not v_email.strip() or not v_pwd.strip() or not v_pwd_conf.strip():
-                st.error("Please fill in your name, email, and password confirmation.")
+            if not v_name.strip() or not v_email.strip() or not v_email_conf.strip() or not v_pwd.strip() or not v_pwd_conf.strip():
+                st.error("Please fill in your name, email, email confirmation, and password confirmation.")
             elif not manager.valid_name(v_name):
                 st.error("Invalid name. Please enter a valid name.")
             elif not manager.valid_password(v_pwd):
                 st.error("Password must be at least 6 characters and include letters and numbers.")
             elif v_pwd != v_pwd_conf:
                 st.error("Passwords do not match. Please re-enter.")
+            elif v_email.strip().lower() != v_email_conf.strip().lower():
+                st.error("Email addresses do not match. Please re-enter.")
             elif "@" not in v_email or "." not in v_email.split("@")[-1]:
                 st.error("Please provide a valid email address.")
             elif manager.find_user_by_email(v_email.strip()) is not None:
@@ -280,6 +283,58 @@ def show_main_page(manager):
                     st.success("🎉 Thank you! Your volunteer application has been submitted. Our team will review and approve it shortly.")
                 except Exception as e:
                     st.error(f"Failed to submit application: {e}")
+
+    # Volunteer Status Lookup & Approved Volunteers Roster
+    st.write("")
+    st.markdown("##### 🔍 Check Volunteer Application Status")
+    chk_c1, chk_c2 = st.columns([3, 1])
+    with chk_c1:
+        check_email = st.text_input("Enter your application email to check status", placeholder="your_email@example.com", key="chk_vol_email")
+    with chk_c2:
+        st.write("")
+        st.write("")
+        btn_check = st.button("Check Status", width="stretch", key="btn_chk_vol_status")
+
+    if btn_check and check_email.strip():
+        search_email = check_email.strip().lower()
+        matched_vol = next((v for v in manager.volunteers if hasattr(v, "email") and v.email.strip().lower() == search_email), None)
+        if matched_vol:
+            st.success(f"🎉 **Application Approved!** You are registered as Volunteer #{matched_vol.id} ({matched_vol.name}). You can sign in using your email and password at the Member Portal below.")
+        else:
+            matched_app = next((a for a in getattr(manager, "applications", []) if a.get("email", "").strip().lower() == search_email), None)
+            if matched_app:
+                app_status = matched_app.get("status", "pending")
+                if app_status == "pending":
+                    st.info(f"⏳ **Application Pending Review:** Application #{matched_app.get('id')} submitted on {matched_app.get('submitted_at')} is currently awaiting review by our administrators.")
+                elif app_status == "approved":
+                    st.success("🎉 **Application Approved!** Your volunteer account is active. You may now sign in at the Member Portal below.")
+                else:
+                    st.warning(f"Application Status: {app_status.upper()}")
+            else:
+                st.error(f"No volunteer application or account found with email '{check_email.strip()}'.")
+
+    st.write("")
+    st.markdown("##### 🌟 Approved Community Volunteers")
+    st.caption("All volunteers currently active and verified across our community network.")
+    all_volunteers = manager.volunteers
+    if not all_volunteers:
+        st.info("No approved volunteers registered yet. Submit your application above to become our first volunteer!")
+    else:
+        v_cols = st.columns(2)
+        for idx, v in enumerate(all_volunteers):
+            with v_cols[idx % 2]:
+                with st.container(border=True):
+                    c1, c2 = st.columns([1, 3])
+                    with c1:
+                        img_path = getattr(v, "profile_image", "assets/default_avatar.png")
+                        if os.path.exists(img_path):
+                            st.image(img_path, width=70)
+                        else:
+                            st.markdown("🤝")
+                    with c2:
+                        st.markdown(f"**{v.name}**")
+                        st.caption(f"Verified Volunteer · ID #{v.id}")
+                        st.markdown(f"📧 [{v.email}](mailto:{v.email})")
 
     st.write("")
     st.divider()
@@ -336,6 +391,7 @@ def show_main_page(manager):
             with c_d1:
                 d_name = st.text_input("Full Name *")
                 d_email = st.text_input("Email Address *")
+                d_email_conf = st.text_input("Confirm Email Address *")
             with c_d2:
                 d_pwd = st.text_input("Password *", type="password")
                 d_pwd_conf = st.text_input("Confirm Password *", type="password")
@@ -343,14 +399,16 @@ def show_main_page(manager):
             submit_donor_reg = st.form_submit_button("Register as Donor", width="stretch")
 
             if submit_donor_reg:
-                if not d_name.strip() or not d_email.strip() or not d_pwd or not d_pwd_conf:
-                    st.error("All fields are required including password confirmation.")
+                if not d_name.strip() or not d_email.strip() or not d_email_conf.strip() or not d_pwd or not d_pwd_conf:
+                    st.error("All fields are required including email and password confirmation.")
                 elif not manager.valid_name(d_name):
                     st.error("Invalid name.")
                 elif not manager.valid_password(d_pwd):
                     st.error("Password must be at least 6 characters and contain letters and numbers.")
                 elif d_pwd != d_pwd_conf:
                     st.error("Passwords do not match.")
+                elif d_email.strip().lower() != d_email_conf.strip().lower():
+                    st.error("Email addresses do not match.")
                 elif "@" not in d_email or "." not in d_email.split("@")[-1]:
                     st.error("Please provide a valid email address.")
                 elif manager.find_user_by_email(d_email.strip()) is not None:
@@ -373,6 +431,7 @@ def show_main_page(manager):
             with c_c1:
                 cl_name = st.text_input("Full Name *")
                 cl_email = st.text_input("Email Address *")
+                cl_email_conf = st.text_input("Confirm Email Address *")
                 cl_address = st.text_input("Home / Delivery Address *")
             with c_c2:
                 cl_pwd = st.text_input("Password *", type="password")
@@ -384,14 +443,16 @@ def show_main_page(manager):
             submit_client_reg = st.form_submit_button("Register for Food Assistance", width="stretch")
 
             if submit_client_reg:
-                if not cl_name.strip() or not cl_email.strip() or not cl_pwd or not cl_pwd_conf or not cl_address.strip():
-                    st.error("Please provide your name, email, password, password confirmation, and home address.")
+                if not cl_name.strip() or not cl_email.strip() or not cl_email_conf.strip() or not cl_pwd or not cl_pwd_conf or not cl_address.strip():
+                    st.error("Please provide your name, email, email confirmation, password, password confirmation, and home address.")
                 elif not manager.valid_name(cl_name):
                     st.error("Invalid name.")
                 elif not manager.valid_password(cl_pwd):
                     st.error("Password must be at least 6 characters and contain letters and numbers.")
                 elif cl_pwd != cl_pwd_conf:
                     st.error("Passwords do not match.")
+                elif cl_email.strip().lower() != cl_email_conf.strip().lower():
+                    st.error("Email addresses do not match.")
                 elif "@" not in cl_email or "." not in cl_email.split("@")[-1]:
                     st.error("Please provide a valid email address.")
                 elif manager.find_user_by_email(cl_email.strip()) is not None:
@@ -467,6 +528,29 @@ def show_main_page(manager):
                         st.markdown(f"**{s.name}**")
                         st.caption(f"Food Bank Staff")
                         st.markdown(f"[{s.email}](mailto:{s.email})")
+
+    st.write("")
+    st.markdown("#### 🤝 Community Volunteers")
+    st.caption("Our verified volunteers who support frontline food delivery and collection.")
+    vols = manager.volunteers
+    if not vols:
+        st.info("No active community volunteers registered currently.")
+    else:
+        v_cols = st.columns(2)
+        for idx, v in enumerate(vols):
+            with v_cols[idx % 2]:
+                with st.container(border=True):
+                    c1, c2 = st.columns([1, 3])
+                    with c1:
+                        img_path = getattr(v, "profile_image", "assets/default_avatar.png")
+                        if os.path.exists(img_path):
+                            st.image(img_path, width=70)
+                        else:
+                            st.markdown("🤝")
+                    with c2:
+                        st.markdown(f"**{v.name}**")
+                        st.caption(f"Verified Volunteer · ID #{v.id}")
+                        st.markdown(f"[{v.email}](mailto:{v.email})")
 
 
 
