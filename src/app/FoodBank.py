@@ -226,7 +226,7 @@ class FoodBank:
 
             for hamper_data in data.get("food_hampers", []):
                 raw_status = hamper_data.get("status", "created")
-                status = raw_status[0] if isinstance(raw_status, list) and hamper_data else (raw_status or "created")
+                status = raw_status[0] if isinstance(raw_status, list) and raw_status else (raw_status or "created")
                 hamper = FoodHamper(
                     hamper_data["id"], hamper_data.get("client_id"),
                     hamper_data["description"], status=status,
@@ -664,11 +664,17 @@ class FoodBank:
                 user.work = []
                 user.completed_work = []
                 for hamper in self.food_hampers:
-                    if str(hamper.volunteer_id) == str(user_id) and str(hamper.status).lower() != "delivered":
+                    curr_h_st = hamper.status[0] if isinstance(hamper.status, list) and hamper.status else (hamper.status or "")
+                    if str(hamper.volunteer_id) == str(user_id) and str(curr_h_st).lower() != "delivered":
                         hamper.volunteer_id = None
+                        if str(curr_h_st).lower() == "assigned":
+                            self._update_status(hamper, "created")
                 for donation in self.donations:
-                    if str(donation.volunteer_id) == str(user_id):
+                    curr_d_st = donation.status[0] if isinstance(donation.status, list) and donation.status else (donation.status or "")
+                    if str(donation.volunteer_id) == str(user_id) and str(curr_d_st).lower() not in ("collected", "stocked"):
                         donation.volunteer_id = None
+                        if str(curr_d_st).lower() == "assigned":
+                            self._update_status(donation, "created")
 
             collection.remove(user)
             logging.info(f"Removed user ID {user_id} ({user.name}, Role: {type(user).__name__})")
