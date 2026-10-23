@@ -469,8 +469,4 @@ def show_main_page(manager):
                         st.markdown(f"[{s.email}](mailto:{s.email})")
 
 
-# Functional alias
-main_page = show_main_page
-
-
 

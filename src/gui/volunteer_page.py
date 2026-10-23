@@ -749,7 +749,3 @@ def show_volunteer_page(manager, user):
             "Your profile changes have been saved.",
             "Profile"
         )
-
-
-# Functional alias
-volunteer_page = show_volunteer_page

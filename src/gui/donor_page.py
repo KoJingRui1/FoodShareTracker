@@ -462,7 +462,3 @@ def show_donor_page(manager, user):
             "Your profile changes have been saved.",
             "Profile"
         )
-
-
-# Functional alias
-donor_page = show_donor_page

@@ -583,7 +583,3 @@ def show_client_page(manager, user):
             "Your updated information has been saved.",
             "Profile"
         )
-
-
-# Functional alias
-client_page = show_client_page
