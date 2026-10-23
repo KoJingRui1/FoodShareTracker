@@ -13,6 +13,8 @@ from src.gui.main_page import show_main_page
 from src.gui.admin_page import show_admin_page
 from src.gui.staff_page import show_staff_page
 from src.gui.donor_page import show_donor_page
+from src.gui.volunteer_page import show_volunteer_page
+from src.gui.client_page import show_client_page
 
 
 def launch():
@@ -71,6 +73,22 @@ def launch():
             st.rerun()
         else:
             show_donor_page(manager, user)
+    elif st.session_state.current_page == "volunteer":
+        user = st.session_state.get("user")
+        if user is None:
+            # If not logged in, redirect to main/login page
+            st.session_state.current_page = "main"
+            st.rerun()
+        else:
+            show_volunteer_page(manager, user)
+    elif st.session_state.current_page == "client":
+        user = st.session_state.get("user")
+        if user is None:
+            # If not logged in, redirect to main/login page
+            st.session_state.current_page = "main"
+            st.rerun()
+        else:
+            show_client_page(manager, user)
     else:
         st.session_state.current_page = "main"
         show_main_page(manager)

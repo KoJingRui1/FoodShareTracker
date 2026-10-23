@@ -46,7 +46,8 @@ def show_donor_page(manager, user):
         unsafe_allow_html=True
     )
 
-    st.sidebar.image(user.profile_image, width="stretch")
+    avatar_path = user.profile_image if getattr(user, "profile_image", None) and os.path.exists(user.profile_image) else "assets/default_avatar.png"
+    st.sidebar.image(avatar_path, width="stretch")
     st.sidebar.markdown(f"### {user.name}")
     st.sidebar.caption("Donor")
     st.sidebar.divider()
@@ -363,7 +364,7 @@ def show_donor_page(manager, user):
 
         col_img, col_info = st.columns([1, 3])
         with col_img:
-            st.image(user.profile_image, width=150)
+            st.image(avatar_path if "avatar_path" in locals() else (user.profile_image if getattr(user, "profile_image", None) and os.path.exists(user.profile_image) else "assets/default_avatar.png"), width=150)
         with col_info:
             st.subheader(f"Name: {user.name}")
             st.write(f"**Donor ID:** {user.id}")
