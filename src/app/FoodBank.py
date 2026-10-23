@@ -1350,9 +1350,9 @@ class FoodBank:
         if job not in volunteer.work:
             return False
 
-        # If it is an assigned/packed food hamper, mark as delivered
+        # If it is a packed food hamper, mark as delivered
         hamper = self.find_food_hamper_by_id(job)
-        if hamper is not None and str(hamper.status).lower() in ("assigned", "packed"):
+        if hamper is not None and str(hamper.status).lower() == "packed":
             self._update_status(hamper, "delivered")
 
         volunteer.work.remove(job)

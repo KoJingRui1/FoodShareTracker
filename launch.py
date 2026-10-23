@@ -46,6 +46,18 @@ def launch():
         st.session_state.current_page = "new_system" if next_user_id == 0 else "main"
 
     # Route based on system status and session page
+    user = st.session_state.get("user")
+    if user is not None and hasattr(user, "id"):
+        fresh_user = manager.find_user_by_id(user.id)
+        if fresh_user is not None:
+            st.session_state.user = fresh_user
+            user = fresh_user
+        else:
+            # User was removed from database; clear session
+            st.session_state.user = None
+            user = None
+            st.session_state.current_page = "main"
+
     if next_user_id == 0:
         st.session_state.current_page = "new_system"
         show_new_system_page(manager)
